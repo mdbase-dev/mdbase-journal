@@ -60,10 +60,10 @@ callback substitute is offered.
 
 ## Undelivered inputs
 
-Signin1815: CP707 source ACK/queued; SDK SQL extraction is local WIP with tests,
-types/build, **not a concrete scoped collection factory**. Exact public
-factory/client/journal/config ABI and qualified source/artifact packet remain
-unimplemented/unpublished. Callback types are not an implementation.
+Signin PR819 provides the concrete shared native factory/client/journal/config
+source ABI. The corrected source is `09fc77389e65f76d6a6e60d5b8275a09d209cd4d`;
+its predecessor is held. A qualified consumer artifact and runtime approval are
+still pending. Source integration does not authorize a pin or native enablement.
 
 Tnapp must deliver shared manifest-driven assess/apply/setup/original journal ABI
 and qualified `journal.entry@0.1.0` semantic tuple provenance. Final app identity,
@@ -81,3 +81,27 @@ returns its public namespaces; it opens no client/session and contacts no CP.
 The owned browser/server were closed immediately after the run.
 These are asset-consumption checks, not native session/runtime/parser, manifest
 installation, CRUD, sign-in or LAB acceptance. No browser is kept idle. Future browser runs are isolated, sequential and closed immediately.
+
+## Public SDK sign-in UI (local only)
+
+`public/native-signin-ui.mjs` provides the same plain-language sign-in controls as
+the other launch apps. Call the existing one-shot `loadNativeSdk()` first, pass its
+actual result plus explicit SDK release/app identity/origins/runtime/locks/original
+signal to `createNativeSignIn(sdk, options)`, then use
+`mountNativeSignIn(container, binding, { onSignedOut })` in qualified composition.
+The default index/drafts/legacy runtime remain untouched; no guessed native
+configuration or runnable native URL is supplied.
+
+Sign in reserves the tab synchronously before SDK start/expiry renewal. The SDK
+owns polling, approval, custody and native lifecycle. The UI subscribes to actual
+status/email, delegates reopen and selected-ID forget, and waits for confirmed SDK
+close before local sign-out. Close is not grant revocation or protected-store
+erasure. The caller owns teardown and SDK replacement after confirmed close;
+disposing a borrowed view fences callbacks but does not close another owner's SDK.
+
+The native collection callback rejects with **Opening collections isn't available
+in this build yet.** It never manufactures a client or setup result. No unsupported
+decline, offline-sync, setup or reminder state is fabricated. Ten UI/portal/action
+stand-in tests cover original cancellation, reservation ordering, automatic status
+publication, confirmed close, forget and retired views; they are not native auth
+or LAB qualification. Journal stays on its local branch with no remote or PR.
