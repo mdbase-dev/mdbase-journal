@@ -64,6 +64,12 @@ upgrade of the exact v1 bytes.
 `npm run manifest` rebuilds `public/.well-known/mdbase-app.json` from `pack/` with the
 digests pinned, and validates it.
 
+## Local native SDK preparation
+
+See [the migration inventory](docs/new-sdk.md) for the separate local-only
+workspace, save/recovery requirements and blocked qualified SDK inputs. The
+prototype runtime below remains unchanged.
+
 ## Develop
 
 ```sh
