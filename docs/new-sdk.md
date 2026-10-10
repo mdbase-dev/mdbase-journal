@@ -7,7 +7,7 @@ is delivered and proven. Asset intake below is **not a complete native port**.
 
 ## Qualified browser consumption path
 
-The release-qualified `9ab0f31d43ae801241acb5fbc11f3be4ceefa76b` SDK archive is
+The release-qualified `729b5391f9e8e8c192d93a7112324ce65078d106` SDK archive is
 vendored and file-pinned in `package.json`/`package-lock.json`. Its SHA256/SHA512
 and browser member SHA256 are recorded in `vendor/mdbase-next-sdk.json`.
 `npm run build` verifies those bytes, then copies the existing classic-script
@@ -60,10 +60,13 @@ callback substitute is offered.
 
 ## Undelivered inputs
 
-Signin PR819 provides the concrete shared native factory/client/journal/config
-source ABI. The corrected source is `09fc77389e65f76d6a6e60d5b8275a09d209cd4d`;
-its predecessor is held. A qualified consumer artifact and runtime approval are
-still pending. Source integration does not authorize a pin or native enablement.
+The qualified SDK729b5391 archive includes actual SDK819 merge19bdeee1's shared
+native factory/client/journal/config ABI and SDK827 provider-receipt helpers.
+Release qualified all 275 members, 1650 SDK tests and five browser-bundle checks
+(with three existing WASM-gated skips). This is delegated source/archive intake,
+not native factory/producer-ABI, browser or custody acceptance. Runtime/trust
+repinning and serving are not authorized; qualified per-app composition inputs
+remain required.
 
 Tnapp must deliver shared manifest-driven assess/apply/setup/original journal ABI
 and qualified `journal.entry@0.1.0` semantic tuple provenance. Final app identity,

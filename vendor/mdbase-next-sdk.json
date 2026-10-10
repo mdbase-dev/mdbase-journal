@@ -1,10 +1,10 @@
 {
   "package": "@mdbase-dev/sdk",
-  "artifact": "mdbase-dev-sdk-0.0.0-9ab0f31d.tgz",
-  "sourceCommit": "9ab0f31d43ae801241acb5fbc11f3be4ceefa76b",
-  "sha256": "ab4db6bde0e6b3d97a1d8ed9b8126b7f0fd69820b508869cb7b82c489ae4ef13",
-  "integrity": "sha512-JkI7EM9GdYAey70lX2QLD6q4LgSiOYGtd7gs12CzSOdbVSapslcxmJY8C/O/3dIGt0k/UZHccudU1J4XFVzQAQ==",
-  "browserSha256": "25a6a5e7a0618c912afbe94a1f6c55197a29d35d685af1e2c15091f8cb2959ff",
+  "artifact": "mdbase-dev-sdk-0.0.0-729b5391.tgz",
+  "sourceCommit": "729b5391f9e8e8c192d93a7112324ce65078d106",
+  "sha256": "fad2206e0a744ac5e801917831ee580ccbd2cf09df8bd4b3bd58bc76632bbeca",
+  "integrity": "sha512-2KKV/f44MbSePCpR6ACXxiiKNbw3c2Cj91cdXyItBeQcBGpz+DNviUl+6zw34ztzwyb7k7d6UpcaDgr5VfwFLw==",
+  "browserSha256": "d75e23f2dc669765ac29b2256e7da849fb622770fa5446a5b6cc2e7a1c79e858",
   "sourceOnly": true,
   "perAppRuntimeTrustOriginAndOperationsQualified": false
 }

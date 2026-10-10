@@ -27,7 +27,7 @@ function harness() {
 test("local build copies exactly the qualified browser asset and derives SRI", () => {
   assert.equal(createHash("sha256").update(browser).digest("hex"), SDK_ASSET.sha256);
   assert.equal(SDK_ASSET.integrity, `sha384-${createHash("sha384").update(browser).digest("base64")}`);
-  assert.equal(SDK_ASSET.sourceCommit, "9ab0f31d43ae801241acb5fbc11f3be4ceefa76b");
+  assert.equal(SDK_ASSET.sourceCommit, "729b5391f9e8e8c192d93a7112324ce65078d106");
 });
 
 test("classic-script loader returns the actual SDK public namespaces without opening a client", async () => {
@@ -42,6 +42,8 @@ test("classic-script loader returns the actual SDK public namespaces without ope
   assert.equal(typeof sdk.Client.MdbaseClient.prototype.create, "function");
   assert.equal(typeof sdk.AppHost.AppWebSignInSession, "function");
   assert.equal(typeof sdk.AppHost.selectAppEnvironment, "function");
+  assert.equal(typeof sdk.AppHost.createAppWebCollectionAdapter, "function");
+  assert.equal(typeof sdk.AppHost.openAppWebCollectionClient, "function");
   assert.equal(h.script.removed, true);
 });
 
