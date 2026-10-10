@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-labelledby="mdbase-favicon-title">
+  <title id="mdbase-favicon-title">mdbase journal</title>
+  <style>
+    .field { fill: #00785a; }
+    .line { fill: #131921; }
+    @media (prefers-color-scheme: dark) {
+      .field { fill: #4cc3a0; }
+      .line { fill: #e1e5ea; }
+    }
+  </style>
+  <!-- One row of the mdbase mark: a single field and a line of writing. -->
+  <rect class="field" x="1" y="7" width="2" height="2"/>
+  <rect class="line" x="4" y="7" width="11" height="2"/>
+</svg>
