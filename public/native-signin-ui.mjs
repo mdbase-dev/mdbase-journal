@@ -1,3 +1,7 @@
+import { openConnectPopup } from "./connect-popup.mjs";
+import { ConnectPopupBlocked as SignInTabBlocked } from "./connect-popup.mjs";
+export { ConnectPopupBlocked as SignInTabBlocked } from "./connect-popup.mjs";
+
 // UI-only binding to the qualified SDK's public AppHost namespace. Callers use
 // loadNativeSdk() once and supply its actual result and explicit SDK options.
 export const signInCopy = Object.freeze({
@@ -10,20 +14,16 @@ export const signInCopy = Object.freeze({
   signOut: "Sign out",
   unavailable: "Opening collections isn't available in this build yet.",
 });
-export class SignInTabBlocked extends Error { constructor() { super(signInCopy.tabBlocked); } }
-
+// UI-only window ownership identity, not a native actor/record/journal namespace.
+let nextPortalKey = 0;
 export function createSignInPortalUi({ window = globalThis.window } = {}) {
-  let reserved = null;
-  const open = () => {
-    const tab = window.open("about:blank", "_blank");
-    if (!tab) throw new SignInTabBlocked();
-    tab.opener = null;
-    return { navigate(uri) { tab.location.replace(uri); }, close() { tab.close(); } };
-  };
+  const name = `mdbase-journal-connect-${++nextPortalKey}`;
+  let active = null;
+  const open = () => openConnectPopup({ name, window });
   return {
-    reserve() { reserved ??= open(); },
-    open() { const portal = reserved ?? open(); reserved = null; return portal; },
-    cancel() { reserved?.close(); reserved = null; },
+    reserve() { if (!active || active.closed) active = open(); },
+    open() { if (!active || active.closed) active = open(); return active; },
+    cancel() { const original = active; active = null; original?.close(); },
   };
 }
 export async function unavailableCollection({ signal }) {
@@ -85,6 +85,8 @@ export function mountNativeSignIn(container, { session, portal }, { onSignedOut,
   const render = () => {
     if (!active) return;
     const snapshot = session.getSnapshot();
+    // Already paired does not finish additional consent: authorizing stays open.
+    if (["unselected", "opening", "setup_required", "ready", "blocked", "closed"].includes(snapshot.status)) portal.cancel();
     const view = signInPresentation(snapshot, problem);
     const children = [];
     if (view.identity) children.push(node("p", view.identity));
@@ -113,6 +115,7 @@ export function mountNativeSignIn(container, { session, portal }, { onSignedOut,
   render();
   return () => {
     active = false; unsubscribe(); document.removeEventListener("visibilitychange", foreground);
+    portal.cancel();
     container.replaceChildren(); // Borrowed SDK session is closed by its owner.
   };
 }

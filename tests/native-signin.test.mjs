@@ -60,12 +60,37 @@ test("aborted original owner cannot construct a new session", () => {
   const controller = new AbortController(); const reason = new Error("original"); controller.abort(reason);
   assert.throws(() => createNativeSignIn({ AppHost: { AppWebSignInSession() { assert.fail("constructed"); } } }, { signal: controller.signal }), error => error === reason);
 });
-test("tab is reserved once, detached, and navigated only when the SDK takes it", () => {
-  const calls = []; const tab = { opener: {}, location: { replace(uri) { calls.push(uri); } }, close() { calls.push("close"); } };
-  const portal = createSignInPortalUi({ window: { open(uri, target) { calls.push([uri, target]); return tab; } } });
-  portal.reserve(); portal.reserve(); assert.equal(tab.opener, null); assert.equal(calls.length, 1);
-  const capability = portal.open(); capability.navigate("https://mdbase.test/approval"); capability.close();
-  assert.deepEqual(calls, [["about:blank", "_blank"], "https://mdbase.test/approval", "close"]);
+test("popup is reserved once with production geometry/opener, and remains owned after handoff", () => {
+  const calls = []; const opener = {}; const popup = { opener, closed: false, location: { href: "" }, close() { calls.push("close"); } };
+  const portal = createSignInPortalUi({ window: { open(...args) { calls.push(args); return popup; } } });
+  portal.reserve(); portal.reserve(); assert.equal(popup.opener, opener); assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], ""); assert.match(calls[0][1], /^mdbase-journal-connect-/); assert.equal(calls[0][2], "popup,width=620,height=760");
+  const capability = portal.open(); capability.navigate("https://mdbase.test/approval");
+  assert.equal(popup.location.href, "https://mdbase.test/approval");
+  portal.reserve(); assert.equal(portal.open(), capability); assert.equal(calls.length, 1);
+  portal.cancel(); portal.cancel(); assert.equal(calls[1], "close"); assert.equal(calls.length, 2);
+  assert.throws(() => capability.navigate("https://mdbase.test/late"), /Sign-in window closed/);
+});
+test("tab fallback has noopener semantics and preserves its original navigation handle", () => {
+  const calls = []; const tab = { opener: {}, closed: false, location: { href: "" }, close() {} };
+  const portal = createSignInPortalUi({ window: { open(...args) { calls.push(args); return calls.length === 1 ? null : tab; } } });
+  portal.reserve(); assert.deepEqual(calls[1], ["", "_blank"]); assert.equal(tab.opener, null);
+  portal.open().navigate("https://mdbase.test/approval"); assert.equal(tab.location.href, "https://mdbase.test/approval");
+});
+test("manually closed windows reopen without sharing a retired UI owner's name", () => {
+  const calls = []; const first = { closed: false, location: { href: "" }, close() {} }; const second = { ...first };
+  const window = { open(...args) { calls.push(args); return calls.length === 1 ? first : second; } };
+  const portal = createSignInPortalUi({ window }); portal.reserve(); const original = portal.open(); first.closed = true;
+  portal.reserve(); assert.notEqual(portal.open(), original);
+  createSignInPortalUi({ window }).reserve(); assert.equal(calls[0][1], calls[1][1]); assert.notEqual(calls[0][1], calls[2][1]);
+});
+test("already paired authorizing keeps popup open, completed and terminal SDK statuses close it", () => {
+  for (const status of ["unselected", "opening", "setup_required", "ready", "blocked", "closed"]) {
+    const h = harness({ status: "authorizing", signIn: paired }); const dispose = mountNativeSignIn(h.container, h);
+    assert.equal(h.calls.includes("cancel"), false);
+    h.publish({ status }); assert.equal(h.calls.includes("cancel"), true);
+    dispose(); assert.equal(h.calls.includes("close"), false);
+  }
 });
 test("blocked tab is distinguishable", () => {
   const portal = createSignInPortalUi({ window: { open() { return null; } } });
@@ -79,7 +104,7 @@ test("expiry and initial startup reserve before asynchronous SDK work", async ()
   await authorizeNativeSignIn(fresh.session, fresh.portal);
   assert.deepEqual(fresh.calls, ["reserve", "start", "authorize"]);
 });
-test("SDK refusal is original and cancels only the unused tab reservation", async () => {
+test("SDK refusal is original and closes only the owned portal", async () => {
   const h = harness(); const error = new Error("original refusal"); h.session.authorize = async () => { throw error; };
   await assert.rejects(authorizeNativeSignIn(h.session, h.portal), reason => reason === error);
   assert.deepEqual(h.calls, ["reserve", "cancel"]);

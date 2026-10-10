@@ -92,8 +92,15 @@ signal to `createNativeSignIn(sdk, options)`, then use
 The default index/drafts/legacy runtime remain untouched; no guessed native
 configuration or runnable native URL is supplied.
 
-Sign in reserves the tab synchronously before SDK start/expiry renewal. The SDK
-owns polling, approval, custody and native lifecycle. The UI subscribes to actual
+Sign in reserves a named 620×760 Connect popup synchronously before SDK
+start/expiry renewal, using the other apps' production pattern. The trusted popup
+keeps its opener so the UI can close it across origins; the tab fallback detaches
+its opener before navigation (noopener semantics). No secrets, postMessage
+approval or storage callback use the opener. The UI keeps its original handle
+after SDK handoff and closes on completed/terminal public statuses, never while
+authorizing additional consent even when already paired. Disposal closes only
+the owned popup. A detached fallback tab is not claimed parent-closeable across
+origins. The SDK owns polling, approval, custody and native lifecycle. The UI subscribes to actual
 status/email, delegates reopen and selected-ID forget, and waits for confirmed SDK
 close before local sign-out. Close is not grant revocation or protected-store
 erasure. The caller owns teardown and SDK replacement after confirmed close;
@@ -101,7 +108,11 @@ disposing a borrowed view fences callbacks but does not close another owner's SD
 
 The native collection callback rejects with **Opening collections isn't available
 in this build yet.** It never manufactures a client or setup result. No unsupported
-decline, offline-sync, setup or reminder state is fabricated. Ten UI/portal/action
+decline, offline-sync, setup or reminder state is fabricated. Thirteen UI/portal/action
 stand-in tests cover original cancellation, reservation ordering, automatic status
 publication, confirmed close, forget and retired views; they are not native auth
-or LAB qualification. Journal stays on its local branch with no remote or PR.
+or LAB qualification. The updated real Chromium check uses two owned loopback
+origins and the original popup handle: additional consent stays open, then the UI
+actually closes after a completion snapshot. The fixture never closes the popup;
+390px long-email layout and keyboard/blocked-path checks also pass. All 40 Node
+tests pass. Journal stays on its local branch with no remote or PR.
