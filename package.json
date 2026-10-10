@@ -3,10 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "node scripts/build-sdk.mjs",
+    "predev": "npm run build",
     "manifest": "node scripts/build-manifest.mjs",
     "icons": "node scripts/icons.mjs",
     "dev": "python3 -m http.server -d public 8765",
     "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@mdbase-dev/sdk": "file:vendor/mdbase-dev-sdk-0.0.0-9ab0f31d.tgz"
   },
   "devDependencies": {
     "@mdbase-dev/connect-dev": "0.1.0-beta.123"

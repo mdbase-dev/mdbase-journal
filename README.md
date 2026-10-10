@@ -66,16 +66,25 @@ digests pinned, and validates it.
 
 ## Local native SDK preparation
 
-See [the migration inventory](docs/new-sdk.md) for the separate local-only
-workspace, save/recovery requirements and blocked qualified SDK inputs. The
-prototype runtime below remains unchanged.
+This workspace is local-only: no remote or deployment is authorised. The
+qualified `9ab0f31d` SDK archive is vendored and installed from a file pin.
+`npm run build` copies its exact already-built browser asset into `public/sdk/`;
+there is no bundler, repacking, CDN dependency or new SDK publication requirement.
+`public/load-native-sdk.mjs` loads that asset with SRI and returns the public
+`MdbaseSDK.Client`/`AppHost` namespaces without opening a session.
+
+See [the migration inventory](docs/new-sdk.md) for consumption, save/recovery
+requirements and the still-undelivered shared native factory/setup APIs. This is
+asset intake, **not a completed native runtime migration**. The prototype's old
+CDN/default runtime and all local draft behavior remain unchanged.
 
 ## Develop
 
 ```sh
 npm install
-npm run dev          # http://localhost:8765/?demo
-npm test             # selection, pending-write safety, quiet controls, Undo, and spacing
+npm run build        # verify pin + copy qualified SDK browser bytes, local only
+npm run dev          # builds SDK assets, then http://localhost:8765/?demo
+npm test             # legacy behavior + actual native bundle/loader tests
 ```
 
 ## Icons
@@ -92,7 +101,9 @@ the PNGs in `public/`; `public/favicon.svg` is written by hand.
 
 ## Deploy
 
-Deployed as a throwaway preview on the `callum-artifacts` Pages project:
+The canonical prototype was deployed as a throwaway preview on the
+`callum-artifacts` Pages project. The command below is historical, **not
+authorisation to deploy this local SDK workspace**:
 
 ```sh
 npx wrangler@4.125.0 pages deploy public --project-name callum-artifacts --branch mdbase-journal
