@@ -35,11 +35,27 @@ Coordinator co0578 / co0636: rows 12, 16, 17 and 20.
   and `journal.collection` migrate once to `journal.prefs.v2`; original bytes
   remain, but modern preferences never re-read or resurrect old choices.
   Storage failure retains the legacy choices and retries migration safely;
-  a fresh visit with no legacy preferences allocates no storage.
+  a fresh visit with no legacy preferences allocates no preference storage.
   A saved type is restored only
   if it exists in the current canonical catalog. SDK memory/URL owns collection
   selection; a legacy last-collection hint offers an explicit SDK selection
   action, never an automatic approval, fallback, or URL override.
+
+Coordinator co0728: row 13 returning-user notice.
+
+- Before startup, presence of historical Journal preference, collection or draft
+  keys shows one calm, dismissible notice with the CP's approve-once wording,
+  unchanged collections/notes, the Private desktop-online caveat and an official
+  mdbase.dev link. It never reads old values, performs network calls, approves
+  access, moves focus or blocks editing.
+- One fixed seen marker records the first visit (including fresh users, so new
+  preferences cannot later be mistaken for old usage). This is not a draft.
+  Quota failure is best-effort with a same-lifetime RAM latch; inaccessible
+  storage silently skips the notice. Persistence across a full reload cannot be
+  promised when the browser refuses writes. Original storage bytes remain intact.
+- Lean DOM tests cover old-key presence, once-only visits, dismissal with text
+  and focus retained, fresh users, quota and privacy-policy failures. No new
+  browser/native qualification is implied.
 
 Verification: strict TypeScript, the full Node suite and writing-only build. Tests use
 actual SDK record CRUD with MemoryReplica and controlled catalog/status metadata;
@@ -48,5 +64,6 @@ checks original SDK Worker/native archive bytes and an exact application graph.
 There is no separate lint script. Six writing-only loopback browser checks
 passed on the earlier grid-fix tree; later SDK/migration changes have source
 checks, not fresh browser or native qualification. SDK error/status helpers
-use the exact DEV/LAB SDK intake. Per-item unavailable-collection reasons await
-qualified SDK public-list propagation; no consumer workaround is used.
+use the exact DEV/LAB SDK41c intake. Public collection availability now propagates
+through that qualified SDK; per-item UI is a separate follow-up, not a consumer
+workaround.

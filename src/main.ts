@@ -1,7 +1,9 @@
 import {createJournalApplication, type JournalApplicationInputs} from "./application.js";
 import {JournalDrafts} from "./drafts.js";
 import {mountJournal} from "./view.js";
+import {mountReturningNotice} from "./returning-notice.js";
 declare const JOURNAL_APPLICATION_INPUTS: JournalApplicationInputs | null;
+mountReturningNotice(document, () => localStorage);
 // A writing-only build never supplies a pretend registered ID or SDK runtime.
 const entry = JOURNAL_APPLICATION_INPUTS === null ? null : createJournalApplication(JOURNAL_APPLICATION_INPUTS);
 // Access storage inside operations: browser privacy policy can throw even from
