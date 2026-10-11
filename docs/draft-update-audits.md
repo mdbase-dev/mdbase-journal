@@ -15,6 +15,10 @@ Coordinator co0578 / co0636: rows 12, 16, 17 and 20.
   original native capture identities: imported text stays local and explicitly
   needs original-save review, even when edited. It is never automatically sent
   as a new native record. Oversized entries cannot block importing smaller ones.
+  Malformed entries cannot hide later pending writing, invalid dates fall back
+  locally without dropping text, and colliding IDs never overwrite even an
+  unreadable original native copy. Actual first-run/reload tests verify quiet
+  import and that resumed, edited writing is neither duplicated nor reset.
 - New empty visits/pages allocate an in-memory draft, not a localStorage entry.
   The first input must persist before any remote capture. Undo retains the same
   old draft identity. New pages allocate unique initial filenames before capture;
@@ -37,10 +41,12 @@ Coordinator co0578 / co0636: rows 12, 16, 17 and 20.
   selection; a legacy last-collection hint offers an explicit SDK selection
   action, never an automatic approval, fallback, or URL override.
 
-Verification: strict TypeScript, 75 Node tests and writing-only build. Tests use
+Verification: strict TypeScript, the full Node suite and writing-only build. Tests use
 actual SDK record CRUD with MemoryReplica and controlled catalog/status metadata;
 these are not native runtime, registration or delivery qualification. The build
 checks original SDK Worker/native archive bytes and an exact application graph.
-There is no separate lint script. Browser checks remain queued under the shared
-lease/HOLD. SDK error/status helpers and unavailable-collection actions wait for
-coordinated intake of the new qualified SDK cut (co0597/co0605).
+There is no separate lint script. Six writing-only loopback browser checks
+passed on the earlier grid-fix tree; later SDK/migration changes have source
+checks, not fresh browser or native qualification. SDK error/status helpers
+use the exact DEV/LAB SDK intake. Per-item unavailable-collection reasons await
+qualified SDK public-list propagation; no consumer workaround is used.

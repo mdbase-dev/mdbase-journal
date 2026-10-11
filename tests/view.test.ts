@@ -43,6 +43,21 @@ test("unregistered local writing opens a blank page and never needs an SDK", () 
   assert.notEqual(b.currentDraft().id, id); assert.equal(h.page.value, ""); assert.equal(drafts.get(id)?.body, "A private page");
   b.dispose(); h.window.close();
 });
+test("first run imports prototype text quietly and reload never duplicates or overwrites resumed writing", () => {
+  const h = dom(), storage = memoryStorage(), original = JSON.stringify({body: "Earlier local writing", createdIn: "old"});
+  storage.setItem("journal.note.original", original);
+  const drafts = new JournalDrafts(storage), view = mountJournal(h.window.document, drafts, null);
+  assert.equal(h.page.value, "", "migration does not replace the new writing surface");
+  assert.equal(drafts.list().length, 1); assert.equal(drafts.list()[0]!.createAttempt, null);
+  const resume = h.window.document.querySelector<HTMLButtonElement>("#pending-details button")!;
+  assert.equal(resume.textContent, "Resume writing"); resume.click();
+  const id = view.currentDraft().id; h.write("Resumed original text plus more"); view.dispose();
+  const again = mountJournal(h.window.document, new JournalDrafts(storage), null);
+  assert.equal(drafts.list().length, 1); assert.equal(drafts.get(id)?.body, "Resumed original text plus more");
+  assert.equal(storage.getItem("journal.note.original"), original);
+  assert.equal(drafts.get(id)?.createAttempt, null); assert.equal(drafts.get(id)?.legacyKey, "journal.note.original");
+  again.dispose(); h.window.close();
+});
 test("first-input writing controls reappear when quiet mode ends and reset on a new page", () => {
   const h = dom(), drafts = new JournalDrafts(memoryStorage()), view = mountJournal(h.window.document, drafts, null);
   assert.equal(h.window.document.body.classList.contains("typing"), false);

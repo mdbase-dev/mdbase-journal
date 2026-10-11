@@ -19,6 +19,31 @@ test("pending legacy writing imports once with original text/date/path/destinati
   assert.equal(imported[0]!.legacyKey, "journal.note." + id); assert.equal(drafts.legacyPendingCount(), 0);
   assert.equal(storage.getItem("journal.note." + id), old);
 });
+test("legacy ID collision cannot overwrite even malformed original native bytes", () => {
+  const storage = memoryStorage(), id = crypto.randomUUID(), native = "{unreadable original native writing";
+  storage.setItem("journal.native.note." + id, native);
+  const old = JSON.stringify({id, body: "Earlier prototype text", createdIn: "original"});
+  storage.setItem("journal.note." + id, old);
+  const drafts = new JournalDrafts(storage); drafts.importLegacy(); drafts.importLegacy();
+  const imported = drafts.list(); assert.equal(imported.length, 1); assert.notEqual(imported[0]!.id, id);
+  assert.equal(imported[0]!.body, "Earlier prototype text"); assert.equal(imported[0]!.createAttempt, null);
+  assert.equal(storage.getItem("journal.native.note." + id), native); assert.equal(storage.getItem("journal.note." + id), old);
+});
+test("out-of-range legacy timestamps preserve text with a valid local fallback date", () => {
+  const storage = memoryStorage(), old = JSON.stringify({body: "Original text", createdMs: Number.MAX_VALUE});
+  storage.setItem("journal.note.old-date", old);
+  const drafts = new JournalDrafts(storage); drafts.importLegacy();
+  assert.equal(drafts.list()[0]?.body, "Original text"); assert(Number.isFinite(Date.parse(drafts.list()[0]!.created)));
+  assert(Number.isFinite(new Date(drafts.list()[0]!.createdMs).getTime()));
+  assert.equal(storage.getItem("journal.note.old-date"), old);
+});
+test("a malformed prototype entry cannot hide later pending writing from the count", () => {
+  const storage = memoryStorage(); storage.setItem("journal.note.bad", "not json");
+  storage.setItem("journal.note.later", JSON.stringify({body: "Later original writing"}));
+  const drafts = new JournalDrafts(storage); assert.equal(drafts.legacyPendingCount(), 1);
+  drafts.importLegacy(); assert.equal(drafts.legacyPendingCount(), 0); assert.equal(drafts.list().length, 1);
+  assert.equal(storage.getItem("journal.note.bad"), "not json");
+});
 test("saved, empty and malformed prototype entries are not turned into write intents", () => {
   const storage = memoryStorage(); storage.setItem("journal.note.bad", "not json");
   storage.setItem("journal.note.saved", JSON.stringify({body: "Saved", savedBody: "Saved"}));

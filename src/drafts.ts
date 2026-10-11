@@ -183,14 +183,15 @@ export class JournalDrafts {
       let value: unknown;
       try {value = JSON.parse(this.storage.getItem(key) ?? "null");} catch {continue;}
       if (!object(value) || typeof value.body !== "string" || !value.body.trim() || value.body === value.savedBody) continue;
+      const legacyMs = typeof value.createdMs === "number" && Number.isFinite(value.createdMs) && Number.isFinite(new Date(value.createdMs).getTime()) ? value.createdMs : null;
       const date = typeof value.created === "string" && Number.isFinite(Date.parse(value.created)) ? new Date(value.created) :
-        typeof value.createdMs === "number" && Number.isFinite(value.createdMs) ? new Date(value.createdMs) : new Date();
+        legacyMs !== null ? new Date(legacyMs) : new Date();
       const draft = this.blank(typeof value.targetCollectionId === "string" ? value.targetCollectionId : typeof value.createdIn === "string" ? value.createdIn : null, date);
-      if (uuid(value.id) && !this.get(value.id)) Object.assign(draft, {id: value.id});
+      if (uuid(value.id) && this.storage.getItem(prefix + value.id) === null) Object.assign(draft, {id: value.id});
       try {
         this.put({...draft, body: value.body, path: typeof value.path === "string" ? value.path : null,
           created: typeof value.created === "string" && Number.isFinite(Date.parse(value.created)) ? value.created : draft.created,
-          createdMs: typeof value.createdMs === "number" && Number.isFinite(value.createdMs) && Number.isFinite(new Date(value.createdMs).getTime()) ? value.createdMs : draft.createdMs,
+          createdMs: legacyMs ?? draft.createdMs,
           touchedMs: typeof value.touchedMs === "number" && Number.isFinite(value.touchedMs) ? value.touchedMs : draft.touchedMs,
           finished: true, legacyKey: key});
         imported.add(key);
@@ -205,8 +206,9 @@ export class JournalDrafts {
       for (let i = 0; i < this.storage.length; i++) {
         const key = this.storage.key(i);
         if (!key?.startsWith("journal.note.") || imported.has(key)) continue;
-        const data: unknown = JSON.parse(this.storage.getItem(key) ?? "null");
-        if (data && typeof data === "object" && "body" in data && typeof data.body === "string" && data.body.trim() && (!("savedBody" in data) || data.savedBody !== data.body)) count++;
+        let data: unknown;
+        try {data = JSON.parse(this.storage.getItem(key) ?? "null");} catch {continue;}
+        if (object(data) && typeof data.body === "string" && data.body.trim() && data.savedBody !== data.body) count++;
       }
     } catch { /* Preserve original legacy storage, including malformed entries. */ }
     return count;
