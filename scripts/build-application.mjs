@@ -17,7 +17,7 @@ export function applicationInputs(env){
 }
 export async function buildApplication({writingOnly=false,env=process.env,output=resolve(root,"public")}={}){
   const inputs=writingOnly?null:applicationInputs(env);
-  const pin=JSON.parse(await readFile(resolve(root,"vendor/mdbase-sdk-dev-4de2cee7.json"),"utf8"));
+  const pin=JSON.parse(await readFile(resolve(root,"vendor/mdbase-sdk-dev-4b955381.json"),"utf8"));
   const archive=resolve(root,"vendor",pin.artifact),bytes=await readFile(archive);
   assert.equal(bytes.length,pin.bytes);assert.equal(hash(bytes,"sha256"),pin.sha256);assert.equal(`sha512-${hash(bytes,"sha512","base64")}`,pin.integrity);
   const protocol=await readFile(resolve(root,pin.protocol.file));
