@@ -39,6 +39,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
   const segmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, {granularity: "word"}) : null;
   let observedCollectionId = application?.getSnapshot().selectedCollectionId ?? null;
   let current = drafts.blank(observedCollectionId);
+  try {drafts.pruneConfirmed();} catch {/* Best-effort cleanup never interrupts local writing. */}
   try {drafts.importLegacy();} catch {problem = "Earlier notes could not be copied on this device. Their original text is still preserved.";}
   const listen = (target: EventTarget, name: string, handler: EventListener) => target.addEventListener(name, handler, {signal: caller.signal});
   const snapshot = (): MdbaseApplicationSnapshot | null => application?.getSnapshot() ?? null;

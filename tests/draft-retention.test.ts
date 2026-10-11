@@ -38,6 +38,34 @@ test("retention evicts only an old finished confirmed copy, never unsaved writin
   const next = drafts.put({...drafts.blank("original"), body: "Next page"});
   assert.equal(drafts.get(saved.id), null); assert.equal(drafts.get(waiting.id)?.body, "Unresolved"); assert.equal(drafts.get(next.id)?.body, "Next page");
 });
+test("new-visit pruning reclaims old confirmed copies below the cap, once only", () => {
+  const storage = memoryStorage(), drafts = new JournalDrafts(storage), saved = confirmed(drafts);
+  const waiting = drafts.put({...drafts.blank(null), body: "Unresolved local writing"});
+  storage.setItem("another-app", "untouched");
+  assert.equal(drafts.pruneConfirmed(), 1); assert.equal(drafts.pruneConfirmed(), 0);
+  assert.equal(drafts.get(saved.id), null); assert.equal(drafts.get(waiting.id)?.body, waiting.body);
+  assert.equal(storage.getItem("another-app"), "untouched");
+});
+test("proactive pruning protects recent, unfinished, recovery and live-pinned copies", () => {
+  for (const kind of ["recent", "unfinished", "recovery", "pinned"] as const) {
+    const drafts = new JournalDrafts(memoryStorage()), saved = confirmed(drafts);
+    if (kind === "recent") drafts.patch(saved.id, {touchedMs: Date.now()});
+    if (kind === "unfinished") drafts.patch(saved.id, {finished: false});
+    if (kind === "recovery") drafts.patch(saved.id, {recovery: {mutationId: crypto.randomUUID(), recordId: saved.recordId!, baseRevision: null}});
+    if (kind === "pinned") drafts.pin(saved.id);
+    assert.equal(drafts.pruneConfirmed(), 0); assert(drafts.get(saved.id));
+  }
+});
+test("actual default 256-draft and 3 MiB bounds refuse growth without losing writing", () => {
+  const drafts = new JournalDrafts(memoryStorage());
+  for (let i = 0; i < 256; i++) drafts.put({...drafts.blank(null), body: `Unresolved ${i}`});
+  const original = drafts.list()[0]!;
+  assert.throws(() => drafts.put({...drafts.blank(null), body: "Next"}), DraftPersistenceError);
+  assert.equal(drafts.list().length, 256); assert.equal(drafts.get(original.id)?.body, original.body);
+  const bytes = new JournalDrafts(memoryStorage()), before = bytes.put({...bytes.blank(null), body: "Original"});
+  assert.throws(() => bytes.patch(before.id, {body: "日".repeat(1600 * 1024)}), DraftPersistenceError);
+  assert.equal(bytes.get(before.id)?.body, "Original");
+});
 test("pinned borrowed sessions cannot be evicted; each pin releases once", () => {
   const drafts = new JournalDrafts(memoryStorage(), {maxBytes: 100_000, maxDrafts: 1}), saved = confirmed(drafts);
   const first = drafts.pin(saved.id), second = drafts.pin(saved.id), next = {...drafts.blank(null), body: "New"};

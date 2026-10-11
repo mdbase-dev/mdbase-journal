@@ -24,7 +24,9 @@ Coordinator co0578 / co0636: rows 12, 16, 17 and 20.
   be evicted. Unsaved, recovery, imported and live-lease-pinned copies remain;
   exceeding the bound refuses persistence and keeps current RAM text visible
   with the existing keep-page-open warning. Other applications' storage is not
-  pruned.
+  pruned. New visits proactively reclaim eligible old confirmed copies even
+  below the cap; cleanup is best-effort and never interrupts writing. Tests
+  exercise the actual default 256-entry and 3 MiB limits, not only small budgets.
 - Existing theme/folder/type preferences survive. A saved type is restored only
   if it exists in the current canonical catalog. SDK memory/URL owns collection
   selection; a legacy last-collection hint offers an explicit SDK selection

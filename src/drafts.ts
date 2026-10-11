@@ -100,6 +100,23 @@ export class JournalDrafts {
     } catch {throw new DraftPersistenceError();}
     return draft;
   }
+  private canPrune(draft: JournalDraft, now: number): boolean {
+    return !this.pins.has(draft.id) && draft.finished && !!draft.recordId && !draft.recovery && !draft.legacyKey &&
+      draft.body === draft.savedBody && draft.touchedMs <= now - 6 * 60 * 60 * 1000;
+  }
+  /** Reclaim old confirmed copies on a new visit, before hitting a quota.
+   * Unresolved writing and borrowed leases stay protected by the same rule. */
+  pruneConfirmed(now = Date.now()): number {
+    let removed = 0;
+    for (const draft of this.list()) {
+      const key = prefix + draft.id, bytes = this.storage.getItem(key), current = this.get(draft.id);
+      if (!current || !this.canPrune(current, now) || this.storage.getItem(key) !== bytes) continue;
+      this.storage.removeItem(key);
+      if (this.storage.getItem(key) !== null) throw new DraftPersistenceError();
+      removed++;
+    }
+    return removed;
+  }
   /** Evict only old, finished, confirmed native copies, never writing/recovery
    * text, imported text, pinned SDK leases, or another application's storage. */
   private bound(key: string, bytes: string): void {
@@ -113,7 +130,7 @@ export class JournalDrafts {
     const count = () => [...entries.keys()].filter(name => name.startsWith(prefix)).length;
     if (size() <= this.limits.maxBytes && count() <= this.limits.maxDrafts) return;
     for (const draft of this.list().sort((a, b) => a.touchedMs - b.touchedMs)) {
-      if (draft.id === key.slice(prefix.length) || this.pins.has(draft.id) || !draft.finished || !draft.recordId || draft.recovery || draft.legacyKey || draft.body !== draft.savedBody || draft.touchedMs > Date.now() - 6 * 60 * 60 * 1000) continue;
+      if (draft.id === key.slice(prefix.length) || !this.canPrune(draft, Date.now())) continue;
       const name = prefix + draft.id;
       if (this.storage.getItem(name) !== entries.get(name)) continue;
       this.storage.removeItem(name);
