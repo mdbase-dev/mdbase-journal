@@ -57,6 +57,20 @@ test("failed import preserves original bytes and can retry import without duplic
   assert.throws(() => drafts.importLegacy(), DraftPersistenceError); assert.equal(storage.getItem("journal.note.earlier"), old);
   storage.setItem = set; drafts.importLegacy(); drafts.importLegacy(); assert.equal(drafts.list().length, 1);
 });
+test("partial-quota legacy import keeps its first copy stable across repeated recovery visits", () => {
+  const storage = memoryStorage(), first = JSON.stringify({body: "First original", createdIn: "first-destination"}), second = JSON.stringify({body: "Second original", createdIn: "second-destination"});
+  storage.setItem("journal.note.first", first); storage.setItem("journal.note.second", second);
+  const set = storage.setItem; let writes = 0;
+  storage.setItem = (key, value) => {if (++writes === 2) throw new Error("quota after first copy"); set(key, value);};
+  const drafts = new JournalDrafts(storage); assert.throws(() => drafts.importLegacy(), DraftPersistenceError);
+  const original = drafts.list()[0]!; assert.equal(original.body, "First original"); assert.equal(drafts.legacyPendingCount(), 1);
+  storage.setItem = set;
+  for (let i = 0; i < 20; i++) new JournalDrafts(storage).importLegacy();
+  assert.equal(drafts.list().length, 2); assert.equal(drafts.get(original.id)?.body, original.body);
+  assert.equal(drafts.get(original.id)?.targetCollectionId, "first-destination"); assert.equal(drafts.legacyPendingCount(), 0);
+  assert.equal(storage.getItem("journal.note.first"), first); assert.equal(storage.getItem("journal.note.second"), second);
+  for (const copy of drafts.list()) {assert.equal(copy.createAttempt, null); assert.equal(copy.recordId, null); assert.equal(copy.recovery, null);}
+});
 test("retention evicts only an old finished confirmed copy, never unsaved writing", () => {
   const storage = memoryStorage(), drafts = new JournalDrafts(storage, {maxBytes: 100_000, maxDrafts: 2});
   const saved = confirmed(drafts), waiting = drafts.put({...drafts.blank("original"), body: "Unresolved"});

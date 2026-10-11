@@ -30,6 +30,20 @@ test("only SDK-validated HTTPS update links are offered, and stale links are rem
     assert.equal(link.hidden, true); assert.equal(link.hasAttribute("href"), false);
   } finally {view.dispose(); window.close(); f.close();}
 });
+test("registration diagnostics stay developer-only instead of appearing on the writing surface", async () => {
+  const f = await applicationFixture(), window = new JSDOM(html, {runScripts: "outside-only"}).window;
+  const state = {...f.ready, status: "blocked" as const, problem: "application_registration_refused", problemDetail: {
+    name: "MdbaseError", code: "application_registration_refused", registration: {code: "invalid_manifest", paths: ["/homepage", "/icon"]}}};
+  f.fixture.controls.publishSnapshot(state);
+  const copy = describeError(state)!; assert(copy.developerMessage); assert(copy.developerMessage.includes("/homepage"));
+  const view = mountJournal(window.document, new JournalDrafts(memoryStorage()), f.fixture.entry);
+  try {
+    const visible = window.document.getElementById("menu-connection")!.textContent!;
+    assert(visible.includes(copy.title)); assert(visible.includes(copy.message));
+    assert(!visible.includes(copy.developerMessage)); assert(!visible.includes("/homepage")); assert(!visible.includes("invalid_manifest"));
+    assert.equal(window.document.getElementById("status")!.textContent, copy.title);
+  } finally {view.dispose(); window.close(); f.close();}
+});
 for (const problem of ["collection_migrating", "update_required", "account_suspended"]) test(`live ${problem} uses SDK copy without fencing local writing`, async () => {
   const f = await applicationFixture(), job = deferred<ReturnType<typeof catalog>>();
   const describe = mock.method(f.records, "describe", () => job.promise);
