@@ -5,8 +5,8 @@ export interface JournalApplicationInputs {
   readonly environment: MdbaseApplicationDeclaration["environment"];
   readonly origin: string;
 }
-/** Explicit build inputs. The manifest's logical ID and historical deployment
- * origin are never substitutes for a registered native application binding. */
+/** Build inputs. The ID defaults to the manifest's own; sign-in self-registration
+ * supplies the registered one. The manifest homepage is the build origin. */
 export function createJournalApplication(inputs: JournalApplicationInputs): MdbaseApplicationEntry {
   if (!inputs.registeredApplicationId.trim() || !["lab", "production"].includes(inputs.environment) || !inputs.origin) throw new Error("Journal needs its registered application build inputs before connecting.");
   return new MdbaseConnect({id: inputs.registeredApplicationId, name: manifest.name,

@@ -20,16 +20,17 @@ npm run verify        # strict types, all tests, explicit writing-only build
 npm run dev           # writing-only localhost app; no native registration
 ```
 
-`npm run build:local` intentionally builds only local writing. It does not invent a registered ID or enable a mock runtime. To build the native application declaration, all three approved inputs are mandatory:
+`npm run build:local` intentionally builds only local writing. It does not enable a mock runtime. To build the native application, give the environment and the exact origin Journal will be served from:
 
 ```sh
-JOURNAL_REGISTERED_APPLICATION_ID='<registered ID>' \
 JOURNAL_ENVIRONMENT=lab \
-JOURNAL_ORIGIN='<approved exact origin>' \
+JOURNAL_ORIGIN='http://127.0.0.1:48224' \
 npm run build
 ```
 
-These are build inputs, not proof of registration. Do not derive the ID or environment from the logical manifest ID or the historical preview URL. Missing inputs fail the native build. The current SDK41c dev packet contains its original runtime/SQLite WASM and canonical LAB trust (`native.available=true` describes packaged asset availability, not registration/readiness). LAB native consumer builds now succeed with explicit build inputs; without them they still refuse. Production trust remains unavailable. Journal never supplies substitute assets or trust. Registration and any LAB refresh/deployment remain separately owned.
+The build writes `JOURNAL_ORIGIN` into the manifest as its homepage (and icon and redirect URI), because sign-in only registers Journal from the manifest's own origin. LAB builds may use a local `http://` origin (`localhost`, `127.0.0.1` or `[::1]`); production builds need `https://`. `JOURNAL_REGISTERED_APPLICATION_ID` is optional and defaults to the manifest's `id`, as in the other mdbase apps; sign-in self-registration supplies the registered ID. Missing environment or origin fails the native build. `npm run manifest` writes the committed manifest, using `JOURNAL_ORIGIN` when set and the pages.dev origin otherwise. A native build for another origin rewrites `public/.well-known/mdbase-app.json`; do not commit that copy.
+
+The current SDK41c dev packet contains its original runtime/SQLite WASM and canonical LAB trust (`native.available=true` describes packaged asset availability, not registration/readiness). LAB native consumer builds now succeed with explicit build inputs; without them they still refuse. Production trust remains unavailable. Journal never supplies substitute assets or trust. Registration and any LAB refresh/deployment remain separately owned.
 
 Tests use the public SDK application fixture with actual SDK clients over `MemoryReplica` for records and files. Controlled readiness/catalog metadata is test-only, not native/runtime acceptance. Type checking retains `exactOptionalPropertyTypes=true` and `skipLibCheck=false`.
 

@@ -5,11 +5,13 @@ import {readFile,writeFile,mkdir} from "node:fs/promises";
 import {fileURLToPath} from "node:url";
 import {dirname,resolve} from "node:path";
 import {build} from "esbuild";
+import {JOURNAL_MANIFEST_ID,buildJournalManifest,writeJournalManifest} from "./build-manifest.mjs";
 const root=fileURLToPath(new URL("../",import.meta.url));
 const hash=(bytes,algorithm,encoding="hex")=>createHash(algorithm).update(bytes).digest(encoding);
 export function applicationInputs(env){
-  const id=env.JOURNAL_REGISTERED_APPLICATION_ID,environment=env.JOURNAL_ENVIRONMENT,origin=env.JOURNAL_ORIGIN;
-  if(!id?.trim()||!['lab','production'].includes(environment)||!origin)throw new Error("Journal native builds require JOURNAL_REGISTERED_APPLICATION_ID, JOURNAL_ENVIRONMENT and JOURNAL_ORIGIN; use build:local for writing only.");
+  // The ID defaults to the manifest's own; sign-in self-registration supplies the registered one.
+  const id=env.JOURNAL_REGISTERED_APPLICATION_ID??JOURNAL_MANIFEST_ID,environment=env.JOURNAL_ENVIRONMENT,origin=env.JOURNAL_ORIGIN;
+  if(!id.trim()||!['lab','production'].includes(environment)||!origin)throw new Error("Journal native builds require JOURNAL_ENVIRONMENT and JOURNAL_ORIGIN; use build:local for writing only.");
   const url=new URL(origin);
   if(url.origin!==origin||url.username||url.password||url.pathname!=="/"||url.search||url.hash||
     (url.protocol!=="https:"&&!(environment==="lab"&&url.protocol==="http:"&&['localhost','127.0.0.1','[::1]'].includes(url.hostname))))throw new Error("Journal requires an exact approved application origin.");
@@ -17,6 +19,8 @@ export function applicationInputs(env){
 }
 export async function buildApplication({writingOnly=false,env=process.env,output=resolve(root,"public")}={}){
   const inputs=writingOnly?null:applicationInputs(env);
+  // Native builds declare their own origin as the manifest homepage, as SDK registration requires.
+  const manifest=inputs&&await buildJournalManifest({origin:inputs.origin,allowLocal:inputs.environment==="lab"});
   const pin=JSON.parse(await readFile(resolve(root,"vendor/mdbase-sdk-dev-4c484d3c.json"),"utf8"));
   const archive=resolve(root,"vendor",pin.artifact),bytes=await readFile(archive);
   assert.equal(bytes.length,pin.bytes);assert.equal(hash(bytes,"sha256"),pin.sha256);assert.equal(`sha512-${hash(bytes,"sha512","base64")}`,pin.integrity);
@@ -40,7 +44,9 @@ export async function buildApplication({writingOnly=false,env=process.env,output
   for(const value of Object.values(sdk.metafile.outputs))assert.deepEqual(value.imports,[]);
   const app=await build({absWorkingDir:root,entryPoints:["src/main.ts"],bundle:true,platform:"browser",format:"esm",target:"es2022",
     outfile:resolve(output,"journal.js"),metafile:true,define:{JOURNAL_APPLICATION_INPUTS:JSON.stringify(inputs)},
-    plugins:[{name:"public-sdk-entry",setup(builder){builder.onResolve({filter:/^@mdbase-dev\/sdk$/},()=>({path:"./sdk/application/sdk.js",external:true}));}}]});
+    plugins:[{name:"public-sdk-entry",setup(builder){builder.onResolve({filter:/^@mdbase-dev\/sdk$/},()=>({path:"./sdk/application/sdk.js",external:true}));
+      if(manifest)builder.onLoad({filter:/[\\/]public[\\/]\.well-known[\\/]mdbase-app\.json$/},()=>({contents:JSON.stringify(manifest),loader:"json"}));}}]});
+  if(manifest)await writeJournalManifest(manifest,output);
   const imports=Object.values(app.metafile.outputs)[0].imports;
   assert(imports.length>0);
   assert.deepEqual([...new Set(imports.map(x=>x.path))],["./sdk/application/sdk.js"]);

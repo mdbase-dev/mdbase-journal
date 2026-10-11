@@ -15,7 +15,7 @@ The build verifies the immutable archives and every installed SDK dist member ag
 
 The current cut adds SDK-owned lazy Worker startup and pairing only from a sign-in gesture, native-return opening and refused/expired sign-in recovery. SDK refusal copy is unchanged; Sign in remains enabled while authorizing and invokes `approve()` from the click. Journal supplies no pairing or renewal engine.
 
-`npm run build` requires explicit registered application ID, environment and approved origin; see [README](../README.md). `npm run build:local` is an explicit writing-only build with no application constructor. Registration/native admission and deployment remain separate. The earlier SDK archive and provenance remain unchanged.
+`npm run build` requires the environment and exact origin, which also becomes the manifest homepage; the application ID defaults to the manifest's. See [README](../README.md). `npm run build:local` is an explicit writing-only build with no application constructor. Registration/native admission and deployment remain separate. The earlier SDK archive and provenance remain unchanged.
 
 `npm run verify` checks strict declarations with `exactOptionalPropertyTypes=true`, `noUncheckedIndexedAccess=true`, `skipLibCheck=false`, public fixture/actual SDK records and files, browser-asset byte pins, and the writing-only build. Fixtures prove controlled app behavior, not physical popup/native lifecycle or real catalog readiness. The baseline prototype tests were replaced with typed tests of the new surface, not kept as a second app auth/data engine.
 

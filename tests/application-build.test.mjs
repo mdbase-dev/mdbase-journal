@@ -5,15 +5,26 @@ import {execFileSync} from "node:child_process";
 import {fileURLToPath} from "node:url";
 import {resolve} from "node:path";
 import {applicationInputs,buildApplication} from "../scripts/build-application.mjs";
+import {buildJournalManifest} from "../scripts/build-manifest.mjs";
 const root=fileURLToPath(new URL("../",import.meta.url));
-test("native build requires explicit registration/environment/exact origin, never historical defaults",()=>{
+test("native build requires environment and exact origin; the ID defaults to the manifest's",()=>{
   assert.throws(()=>applicationInputs({}),/require/);
   const env={JOURNAL_REGISTERED_APPLICATION_ID:"build-fixture-only",JOURNAL_ENVIRONMENT:"lab",JOURNAL_ORIGIN:"https://journal.fixture"};
-  for(const key of Object.keys(env)){const absent={...env};delete absent[key];assert.throws(()=>applicationInputs(absent),/require/);}
+  for(const key of ["JOURNAL_ENVIRONMENT","JOURNAL_ORIGIN"]){const absent={...env};delete absent[key];assert.throws(()=>applicationInputs(absent),/require/);}
+  const {JOURNAL_REGISTERED_APPLICATION_ID:_,...withoutId}=env;
+  assert.equal(applicationInputs(withoutId).registeredApplicationId,"dev.mdbase.journal-prototype");
   for(const origin of ["https://journal.fixture/path","https://journal.fixture?x=1","http://journal.fixture","https://user@journal.fixture"])
     assert.throws(()=>applicationInputs({...env,JOURNAL_ORIGIN:origin}),/origin/);
   assert.throws(()=>applicationInputs({...env,JOURNAL_ENVIRONMENT:"production",JOURNAL_ORIGIN:"http://localhost:3000"}),/origin/);
   assert.deepEqual(applicationInputs(env),{registeredApplicationId:env.JOURNAL_REGISTERED_APPLICATION_ID,environment:"lab",origin:"https://journal.fixture"});
+});
+test("manifest homepage follows the build origin and defaults to the pages.dev origin",async()=>{
+  const committed=await readFile(resolve(root,"public/.well-known/mdbase-app.json"),"utf8");
+  assert.equal(JSON.stringify(await buildJournalManifest(),null,2)+"\n",committed);
+  assert.equal(JSON.parse(committed).homepage,"https://mdbase-journal.callum-artifacts.pages.dev/");
+  const lab=await buildJournalManifest({origin:"http://127.0.0.1:48224",allowLocal:true});
+  assert.equal(lab.homepage,"http://127.0.0.1:48224/");
+  assert.deepEqual(lab.redirect_uris,["http://127.0.0.1:48224/auth/mdbase/callback"]);
 });
 test("consumer build retains original same-artifact Worker/native bytes and no private/test entry",async()=>{
   const output=await mkdtemp(resolve(root,".application-build-"));
@@ -32,6 +43,7 @@ test("consumer build retains original same-artifact Worker/native bytes and no p
     const native=await buildApplication({output,env:{JOURNAL_REGISTERED_APPLICATION_ID:"build-fixture-only",JOURNAL_ENVIRONMENT:"lab",JOURNAL_ORIGIN:"https://journal.fixture"}});
     assert.equal(native.writingOnly,false);
     assert.equal(native.inputs.registeredApplicationId,"build-fixture-only");
+    assert.equal(JSON.parse(await readFile(resolve(output,".well-known/mdbase-app.json"),"utf8")).homepage,"https://journal.fixture/");
     const provenance=JSON.parse(await readFile(resolve(output,"sdk/native/provenance.lab.json"),"utf8"));
     assert.equal(provenance.runtime.source.commit,"fa49f3d0474a3c5961f3b9986052ead07abcc943");
     assert.equal(provenance.runtime.sha256,"9f90af73e1591cafe9c35bdd42f18ae49d5a91a0186e78695e841fecabcd833a");
