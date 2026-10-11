@@ -7,7 +7,7 @@ const hash=(bytes,algorithm,encoding="hex")=>createHash(algorithm).update(bytes)
 // Compatibility asset-intake checks retain the original classic-script loader.
 // The Journal application itself consumes the public ESM entry, never this IIFE.
 export async function buildSdk(output=new URL("public/sdk/",root)){
-  const pin=JSON.parse(await readFile(new URL("vendor/mdbase-sdk-dev-4b955381.json",root),"utf8"));
+  const pin=JSON.parse(await readFile(new URL("vendor/mdbase-sdk-dev-6a576a5f.json",root),"utf8"));
   const archiveUrl=new URL(`vendor/${pin.artifact}`,root),archive=await readFile(archiveUrl);
   if(hash(archive,"sha256")!==pin.sha256||`sha512-${hash(archive,"sha512","base64")}`!==pin.integrity)throw new Error("Journal SDK archive does not match its dev-intake pin");
   const expected=execFileSync("tar",["-xOf",fileURLToPath(archiveUrl),"package/dist/browser/mdbase-sdk.min.js"],{maxBuffer:16*1024*1024});

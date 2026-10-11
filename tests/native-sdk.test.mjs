@@ -27,7 +27,7 @@ function harness() {
 test("local compatibility build copies the original dev archive browser asset and derives SRI", () => {
   assert.equal(createHash("sha256").update(browser).digest("hex"), SDK_ASSET.sha256);
   assert.equal(SDK_ASSET.integrity, `sha384-${createHash("sha384").update(browser).digest("base64")}`);
-  assert.equal(SDK_ASSET.sourceCommit, "4b9553819ddb769ff1487170c05494321d23ab8b");
+  assert.equal(SDK_ASSET.sourceCommit, "6a576a5f25231333bd899274ad6fed91f54a19ab");
 });
 
 test("classic-script loader returns the actual SDK public namespaces without opening a client", async () => {
