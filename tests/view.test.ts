@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {mock, test} from "node:test";
+import {describeError} from "@mdbase-dev/sdk";
 import {readFileSync} from "node:fs";
 import {JSDOM} from "jsdom";
 import {JournalDrafts} from "../src/drafts.js";
@@ -239,7 +240,10 @@ test("failed sign-out preserves text and never reports a successful physical clo
   assert.equal(h.window.document.getElementById("disconnect")!.hidden, false); h.click("disconnect"); await Promise.resolve(); await Promise.resolve();
   assert(f.fixture.controls.observedActions().some(call => call.action === "close"));
   assert.equal(view.currentDraft().id, id); assert.equal(view.currentDraft().body, "Retained");
-  assert.match(h.window.document.getElementById("status")!.textContent!, /could not finish/); assert.equal(f.records.link, "open");
+  assert.equal(h.window.document.getElementById("status")!.textContent, describeError("internal")!.title);
+  assert.match(h.window.document.getElementById("menu-connection")!.textContent!, /Reload/);
+  assert.doesNotMatch(h.window.document.getElementById("menu-connection")!.textContent!, /physical stop failed/);
+  assert.equal(f.records.link, "open");
   view.dispose(); h.window.close(); f.close();
 });
 test("late catalog completion after disposal cannot start data writes or close a borrowed client", async () => {

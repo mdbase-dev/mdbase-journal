@@ -1,4 +1,4 @@
-import type {MdbaseApplicationEntry, MdbaseApplicationSnapshot} from "@mdbase-dev/sdk";
+import {describeError, summarizeStatus, type MdbaseApplicationEntry, type MdbaseApplicationSnapshot, type MdbaseErrorDescription} from "@mdbase-dev/sdk";
 import {journalConnection} from "./application.js";
 import {DraftPersistenceError, JournalDrafts, notePath, type JournalDraft} from "./drafts.js";
 import {JournalData, type JournalEntryType} from "./journal-data.js";
@@ -23,6 +23,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
   let data: JournalData | null = null;
   let opens: DraftOpens | null = null;
   let unlistenData: (() => void) | null = null;
+  let unlistenStatus: (() => void) | null = null;
+  let actionProblem: MdbaseErrorDescription | null = null;
   let types: JournalEntryType[] = [];
   let type: JournalEntryType | null = null;
   let problem: string | null = null;
@@ -57,12 +59,18 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     const selection = state?.selection;
     const name = selected?.displayName ?? "your collection";
     const record = data?.snapshot(current.id);
+    const description = actionProblem ?? describeError(state) ?? describeError(selection?.problem) ??
+      (selection?.state === "blocked" ? describeError("unavailable") : null);
+    const sync = data && state?.problem ? summarizeStatus(data.connection.records.status, state.problem) : null;
     let unresolved: JournalDraft[] = [];
     try {unresolved = drafts.list().filter(draft => !!draft.body.trim() && draft.body !== draft.savedBody);} catch {problem = "Keep this page open: Journal cannot read its drafts on this device.";}
     let message = problem ?? data?.problem(current.id);
     const opening = opens?.state(current.id);
     if (!message && current.legacyKey) message = "Earlier note: review its original save. Your text stays on this device.";
-    if (!message && opening) message = opening.state === "retrying" ? "The original save is unresolved. Your text stays on this device; checking again." : "Saving…";
+    if (!message && opening?.state === "retrying") message = "The original save is unresolved. Your text stays on this device; checking again.";
+    if (!message && record && ["conflict", "recovery", "deleted", "error"].includes(record.state)) message = "Your text is on this device. Resolve its original save before continuing.";
+    if (!message && description) message = sync?.text ?? description.title;
+    if (!message && opening) message = "Saving…";
     if (!message && record) {
       message = record.state === "saved" && current.body === current.savedBody ? "Saved" : record.state === "saving" ? "Saving…" :
         ["conflict", "recovery", "deleted", "error"].includes(record.state) ? "Your text is on this device. Resolve its original save before continuing." : "On this device";
@@ -105,7 +113,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     const collections = state?.collections ?? [];
     const option = (label: string, value: string) => {const item = document.createElement("option"); item.textContent = label; item.value = value; return item;};
     const requested = selection?.requested.collectionId ?? null;
-    choice.replaceChildren(option("Choose a collection…", ""), ...collections.map(item => option(item.displayName, item.collectionId)),
+    choice.replaceChildren(option("Choose a collection…", ""), ...collections.map(item => option(item.collectionId === requested && description && state?.status !== "ready" ? `${item.displayName} — ${description.title}` : item.displayName, item.collectionId)),
       ...(requested && !collections.some(item => item.collectionId === requested) ? [option("Requested collection (approval needed)", requested)] : []));
     choice.value = requested ?? "";
     choice.disabled = memoryOnly || busy || !application || state?.status === "closed";
@@ -132,7 +140,12 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     another.textContent = "Choose another collection";
     another.hidden = (!requested && selection?.state !== "invalid") || state?.status === "closed";
     another.disabled = busy;
-    element("menu-connection").textContent = selection?.state === "usable" && selected ? `Notes save to ${name} when this collection is ready.` : "Notes stay on this device until the requested collection is ready.";
+    const localCopy = selection?.state === "usable" && selected ? `Notes save to ${name} when this collection is ready.` : "Notes stay on this device until the requested collection is ready.";
+    element("menu-connection").textContent = description ? `${description.title}. ${description.message}${description.actionLabel ? ` Next: ${description.actionLabel}.` : ""} ${localCopy}` : localCopy;
+    const update = element<HTMLAnchorElement>("update-app");
+    update.hidden = !description?.updateUrl;
+    update.textContent = description?.actionLabel ?? "Update the app";
+    if (description?.updateUrl) update.href = description.updateUrl; else update.removeAttribute("href");
     document.body.classList.toggle("undo", !!undoId);
     element("keys").textContent = /Mac|iPhone|iPad/.test(document.defaultView?.navigator.platform ?? "") ? "⌘↩" : "Ctrl+↩";
     const words = segmenter ? [...segmenter.segment(current.body)].filter(item => item.isWordLike).length : current.body.match(/\S+/g)?.length ?? 0;
@@ -142,9 +155,9 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
   /** Invoke synchronously in the gesture stack. SDK reserves its own popup. */
   async function act(action: () => Promise<unknown>): Promise<void> {
     if (disposed || busy) return;
-    busy = true; problem = null;
+    busy = true; problem = null; actionProblem = null;
     try {const pending = action(); render(); await pending; caller.signal.throwIfAborted();}
-    catch {if (!caller.signal.aborted) problem = "Journal could not finish that action. Your text is still on this device.";}
+    catch (error) {if (!caller.signal.aborted) actionProblem = describeError(error) ?? describeError("internal");}
     finally {if (!caller.signal.aborted) {busy = false; render();}}
   }
   function newPage(): void {
@@ -188,20 +201,22 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
   function changed(): void {
     if (!entry || disposed) return;
     const selectedId = snapshot()?.selectedCollectionId ?? null;
+    if (snapshot()?.status === "ready" && !snapshot()?.problem) actionProblem = null;
     const selectionChanged = selectedId !== observedCollectionId;
     observedCollectionId = selectedId;
     const next = journalConnection(entry);
     if (next !== data?.connection) {
-      unlistenData?.(); unlistenData = null; opens?.dispose(); opens = null; data?.release(); data = null; types = []; type = null;
+      unlistenData?.(); unlistenData = null; unlistenStatus?.(); unlistenStatus = null; opens?.dispose(); opens = null; data?.release(); data = null; types = []; type = null;
       if (next) {
         const owned = new JournalData(next, drafts); data = owned;
         opens = new DraftOpens(owned, drafts, () => !disposed && data === owned && owned.connection.isCurrent(), render);
         unlistenData = owned.subscribe(render);
+        unlistenStatus = next.records.onStatus(render);
         void owned.types().then(value => {
           if (disposed || data !== owned) return;
           types = value; type = value.find(item => item.name === preferences.entryTypes?.[owned.connection.id]) ?? (value.length === 1 ? value[0]! : null);
           render(); void save();
-        }, error => {if (!disposed && data === owned) {problem = error instanceof Error ? error.message : "Journal could not read this collection's types."; render();}});
+        }, error => {if (!disposed && data === owned) {actionProblem = describeError(error) ?? describeError("internal"); render();}});
       }
     }
     if (!memoryOnly && selectionChanged && selectedId !== current.targetCollectionId) {
@@ -295,7 +310,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
   if (application?.getSnapshot().status === "not_started") void act(() => application.start({signal: caller.signal}));
   return {currentDraft: () => current, newPage, undoNewPage, dispose() {
     if (disposed) return;
-    disposed = true; caller.abort(); clearUndo(); unlistenApp(); unlistenData?.(); opens?.dispose(); data?.release();
+    disposed = true; caller.abort(); clearUndo(); unlistenApp(); unlistenData?.(); unlistenStatus?.(); opens?.dispose(); data?.release();
     // No SDK replacement, physical close or borrowed-client shutdown on disposal.
   }};
 }
