@@ -1,15 +1,16 @@
 # Public SDK application intake
 
-Journal consumes the immutable SDK8a dev packet through ordinary local file dependencies. This is development intake, not release/runtime qualification.
+Journal consumes the immutable SDKd53 dev packet through ordinary local file dependencies. This is development intake, not release/runtime qualification.
 
-- SDK source: `8a557ad68290e04146e456df94c4946d6f033ea7`.
-- Original SDK bytes/SHA/SRI and independent original protocol pin: `vendor/mdbase-sdk-dev-8a557ad6.json`.
+- SDK source: `d53d7d761c1a7caf100e065a1378384dcc5f6449`.
+- Original SDK bytes/SHA/SRI and independent original protocol pin: `vendor/mdbase-sdk-dev-d53d7d76.json`.
 - `MdbaseConnect`, `MdbaseApplicationDeclaration` and `MdbaseApplicationEntry` come from `@mdbase-dev/sdk`.
 - Test-only `createApplicationFixture` and `MemoryReplica` come from `@mdbase-dev/sdk/testing`; the production entry never imports testing.
-- Application lifecycle and collection selection use `application()` and `connection(id)`. No app-side selection URL parser, popup callback, raw installation bootstrap or missing-runtime workaround remains.
+- The live public `MdbaseConnect` singleton owns lifecycle, `application()` and `connection(id)`. `snapshot.selection` distinguishes a requested collection from an actually usable one; an unapproved request cannot borrow an old ready connection.
+- Approval, access review and the chooser invoke SDK `approve()`, `reauthorize()` and `chooseAnother()` directly in the gesture stack, preserving the original caller signal. No app-side selection URL parser, popup callback, raw installation bootstrap or missing-runtime workaround remains.
 - Records use the same public `connection.records`, original create mutation/UUID, receipt/readback and shared record sessions. Files use that client's identical public FilesApi.
 
-The build verifies the immutable archives and every installed SDK dist member against its original archive. It consumer-bundles only the built public ESM entry, retains the original same-artifact Worker beside it and preserves the packaged native module directory. SDK8a contains the original canonical runtime/SQLite WASM and default-expiry LAB trust. Its packet metadata reports `native.available=true`; this means asset availability only, not browser/native readiness, application registration or LAB admission. LAB native consumer builds work with explicit build inputs and preserve the original Worker/WASM bytes; production trust remains unavailable. The runtime remains independently sourced at `515a7f8b17ebfb9d2d059eeda418fdc0953b5613`, with `rt_app_resources`; it is not relabeled as SDK8a source. It does not rebuild, repack, rewrite installed declarations, renew trust or inject callbacks. Native/SQLite assets are integrity-pinned, not separately signed.
+The build verifies the immutable archives and every installed SDK dist member against its original archive. It consumer-bundles only the built public ESM entry, retains the original same-artifact Worker beside it and preserves the packaged native module directory. SDKd53 contains the original canonical runtime/SQLite WASM and default-expiry LAB trust. Its packet metadata reports `native.available=true`; this means asset availability only, not browser/native readiness, application registration or LAB admission. LAB native consumer builds work with explicit build inputs and preserve the original Worker/WASM bytes; production trust remains unavailable. The runtime remains independently sourced at `515a7f8b17ebfb9d2d059eeda418fdc0953b5613`, with `rt_app_resources`; it is not relabeled as SDKd53 source. The SDK's normal module-relative Worker/WASM/SQLite layout is preserved, including its literal asset references; Journal adds no bundler workaround. It does not rebuild, repack, rewrite installed declarations, renew trust or inject callbacks. Native/SQLite assets are integrity-pinned, not separately signed.
 
 `npm run build` requires explicit registered application ID, environment and approved origin; see [README](../README.md). `npm run build:local` is an explicit writing-only build with no application constructor. Registration/native admission and deployment remain separate. The earlier SDK archive and provenance remain unchanged.
 

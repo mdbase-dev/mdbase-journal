@@ -10,7 +10,12 @@ export function memoryStorage(): Storage {
  * registration evidence. Record/file calls use the actual SDK protocol client. */
 export function snapshot(patch: Partial<MdbaseApplicationSnapshot> = {}): MdbaseApplicationSnapshot {
   const facet = {checking: false, assessment: {status: "ready" as const, problem: null}, problem: null};
-  return {status: "signed_out", signIn: null, collections: [], selectedCollectionId: null, timing: null, problem: null,
+  const id = patch.selectedCollectionId ?? null, collection = patch.collections?.find(item => item.collectionId === id) ?? null;
+  const usable = patch.status === "ready" || patch.status === "setup_required" ? collection : null;
+  // Explicit controlled fixture selection, not an app URL/approval engine.
+  const selection: MdbaseApplicationSnapshot["selection"] = {state: usable ? "usable" : id ? "pending" : "none", problem: null, usable,
+    requested: {collectionId: id, source: id ? "user" : "none", displayName: collection?.displayName ?? null, approved: collection !== null}};
+  return {status: "signed_out", signIn: null, collections: [], selectedCollectionId: null, timing: null, problem: null, selection,
     readiness: {...facet, facets: {capabilities: facet, contracts: facet, configuration: facet, files: facet, people: facet, notifications: facet}}, ...patch};
 }
 export function catalog(field = "created", name = "collection-owned-entry"): wire.DescribeResult {

@@ -4,7 +4,7 @@ import {readFileSync} from "node:fs";
 import {JSDOM} from "jsdom";
 import {JournalDrafts} from "../src/drafts.js";
 import {mountJournal} from "../src/view.js";
-import {journalConnection} from "../src/application.js";
+import {createJournalApplication, journalConnection} from "../src/application.js";
 import {applicationFixture, catalog, deferred, memoryStorage, snapshot} from "./support.js";
 // Parse the actual writing surface; no old inline script or network executes.
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
@@ -13,6 +13,25 @@ function dom() {
   const page = window.document.querySelector<HTMLTextAreaElement>("#page")!;
   return {window, page, write(body: string) {page.value = body; page.dispatchEvent(new window.Event("input", {bubbles: true}));}, click(id: string) {window.document.getElementById(id)!.click();}};
 }
+test("actual public singleton is lazy not_started in a controlled browser host, not an unavailable shell", async () => {
+  // Browser-host stand-ins qualify constructor laziness only, never native
+  // initialization, registration, storage readiness or popup lifecycle.
+  const h = dom(), descriptors = new Map<string, PropertyDescriptor | undefined>();
+  const fetch = mock.method(globalThis, "fetch", () => {throw new Error("Unexpected network");});
+  for (const [name, value] of Object.entries({location: h.window.location, Worker: class {constructor() {throw new Error("Unexpected Worker");}}})) {
+    descriptors.set(name, Object.getOwnPropertyDescriptor(globalThis, name)); Object.defineProperty(globalThis, name, {configurable: true, value});
+  }
+  try {
+    const entry = createJournalApplication({registeredApplicationId: "build-fixture-only", environment: "lab", origin: "https://journal.fixture"});
+    const state = entry.application().getSnapshot();
+    assert.equal(state.status, "not_started"); assert.equal(state.problem, null); assert.equal(state.selection.state, "none");
+    assert.equal(state.readiness.assessment, null); assert.equal(entry.connection("22222222-2222-4222-8222-222222222222"), null);
+    assert.equal(fetch.mock.callCount(), 0); await entry.application().close();
+  } finally {
+    fetch.mock.restore(); for (const [name, descriptor] of descriptors) {if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name);}
+    h.window.close();
+  }
+});
 test("unregistered local writing opens a blank page and never needs an SDK", () => {
   const h = dom(), storage = memoryStorage(), drafts = new JournalDrafts(storage);
   const a = mountJournal(h.window.document, drafts, null);
@@ -119,10 +138,35 @@ test("application selection changes keep old text pinned and start a new page", 
 test("sign-in dispatch is synchronous in the click gesture and retains the original signal", async () => {
   const f = await applicationFixture(), h = dom(); f.fixture.controls.publishSnapshot(snapshot());
   let invoked = false;
-  f.fixture.controls.setHandler("authorize", () => {invoked = true;});
+  f.fixture.controls.setHandler("approve", () => {invoked = true;});
   const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.fixture.entry); h.click("connect-from-menu");
-  assert.equal(invoked, true); assert(f.fixture.controls.observedActions().find(call => call.action === "authorize")?.signal);
+  assert.equal(invoked, true); assert(f.fixture.controls.observedActions().find(call => call.action === "approve")?.signal);
   await Promise.resolve(); view.dispose(); h.window.close(); f.close();
+});
+test("unapproved request cannot borrow the old ready client and approval stays a synchronous SDK action", async () => {
+  const f = await applicationFixture(), h = dom(), drafts = new JournalDrafts(memoryStorage());
+  f.fixture.controls.publishSnapshot({...f.ready, selection: {...f.ready.selection, state: "approval_required",
+    requested: {collectionId: "22222222-2222-4222-8222-222222222222", source: "url", displayName: null, approved: false}}});
+  assert.equal(journalConnection(f.fixture.entry), null);
+  let invoked = false; f.fixture.controls.setHandler("approve", () => {invoked = true;});
+  const view = mountJournal(h.window.document, drafts, f.fixture.entry); h.write("Original destination");
+  const original = view.currentDraft();
+  assert.match(h.window.document.getElementById("status")!.textContent!, /Approve the requested collection/);
+  assert.match(h.window.document.getElementById("menu-connection")!.textContent!, /stay on this device/);
+  h.click("connect-from-menu"); assert.equal(invoked, true);
+  assert(f.fixture.controls.observedActions().find(call => call.action === "approve")?.signal);
+  assert.equal(view.currentDraft().body, original.body); assert.equal(view.currentDraft().targetCollectionId, f.connection.id);
+  view.dispose(); h.window.close(); f.close();
+});
+test("review access delegates reauthorization without changing the original page", async () => {
+  const f = await applicationFixture(), h = dom();
+  f.fixture.controls.publishSnapshot({...f.ready, status: "opening"});
+  let invoked = false; f.fixture.controls.setHandler("reauthorize", () => {invoked = true;});
+  const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.fixture.entry); h.write("Retained");
+  const id = view.currentDraft().id; h.click("connect-from-menu"); assert.equal(invoked, true);
+  assert(f.fixture.controls.observedActions().find(call => call.action === "reauthorize")?.signal);
+  assert.equal(view.currentDraft().id, id); assert.equal(view.currentDraft().body, "Retained");
+  view.dispose(); h.window.close(); f.close();
 });
 test("setup delegates canonical configuration and preserves the same writing page", async () => {
   const f = await applicationFixture(), h = dom(); f.fixture.controls.publishSnapshot({...f.ready, status: "setup_required"});
@@ -133,11 +177,11 @@ test("setup delegates canonical configuration and preserves the same writing pag
   assert.equal(view.currentDraft().id, id); assert.equal(drafts.get(id)?.body, "Retained");
   view.dispose(); h.window.close(); f.close();
 });
-test("forget delegates local selection removal while the original draft stays pinned", async () => {
+test("choose another delegates SDK selection while the original draft stays pinned", async () => {
   const f = await applicationFixture(), h = dom(); f.fixture.controls.publishSnapshot({...f.ready, status: "opening"});
   const drafts = new JournalDrafts(memoryStorage()), view = mountJournal(h.window.document, drafts, f.fixture.entry); h.write("Retained");
   const original = view.currentDraft(); h.click("reconnect-from-menu"); await Promise.resolve(); await Promise.resolve();
-  assert.equal(f.fixture.controls.observedActions().find(call => call.action === "forget")?.collectionId, f.connection.id);
+  assert(f.fixture.controls.observedActions().find(call => call.action === "chooseAnother")?.signal);
   assert.equal(drafts.get(original.id)?.body, "Retained"); assert.equal(drafts.get(original.id)?.targetCollectionId, f.connection.id);
   view.dispose(); h.window.close(); f.close();
 });

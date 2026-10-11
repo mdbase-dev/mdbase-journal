@@ -50,7 +50,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     if (disposed) return;
     if (!memoryOnly) current = drafts.get(current.id) ?? current;
     const state = snapshot();
-    const selected = state?.collections.find(item => item.collectionId === state.selectedCollectionId);
+    const selected = state?.selection.usable ?? null;
+    const selection = state?.selection;
     const name = selected?.displayName ?? "your collection";
     const record = data?.snapshot(current.id);
     let unresolved: JournalDraft[] = [];
@@ -62,8 +63,13 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     }
     if (!message) message = !entry ? "On this device. Journal needs its registered application before connecting." :
       state?.problem === "application_not_yet_available" ? "On this device. Opening collections isn't available in this build yet." :
-      state?.status === "authorizing" ? "Waiting for approval in the mdbase tab…" :
-      state?.status === "setup_required" ? `Set up Journal in ${name}` :
+      selection?.state === "invalid" ? "The requested collection is invalid. Your text stays on this device." :
+      selection?.state === "approval_required" ? "Approve the requested collection, or choose another. Your text stays on this device." :
+      selection?.state === "approving" || state?.status === "authorizing" ? "Waiting for approval in the mdbase tab…" :
+      selection?.state === "opening" || selection?.state === "pending" ? "Opening the requested collection. Your text stays on this device." :
+      state?.problem || selection?.state === "blocked" ? "Journal could not open this collection. Your text stays on this device." :
+      selection?.state === "usable" && state?.status === "setup_required" ? `Set up Journal in ${name}` :
+      state?.status === "unselected" ? "Choose a collection. Your text stays on this device." :
       state?.status === "closed" ? "Signed out. Reload to sign in again." :
       data ? "On this device" : "On this device. Sign in to save.";
     status.textContent = message;
@@ -76,8 +82,10 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     element("collection-name").hidden = !selected;
     const collections = state?.collections ?? [];
     const option = (label: string, value: string) => {const item = document.createElement("option"); item.textContent = label; item.value = value; return item;};
-    choice.replaceChildren(option("Choose a collection…", ""), ...collections.map(item => option(item.displayName, item.collectionId)));
-    choice.value = state?.selectedCollectionId ?? "";
+    const requested = selection?.requested.collectionId ?? null;
+    choice.replaceChildren(option("Choose a collection…", ""), ...collections.map(item => option(item.displayName, item.collectionId)),
+      ...(requested && !collections.some(item => item.collectionId === requested) ? [option("Requested collection (approval needed)", requested)] : []));
+    choice.value = requested ?? "";
     choice.disabled = memoryOnly || busy || !application || state?.status === "closed";
     typeChoice.replaceChildren(option("Choose a type…", ""), ...types.map(item => option(item.name, item.name)));
     typeChoice.value = type?.name ?? "";
@@ -85,17 +93,19 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     element("new-button").hidden = !current.body.trim();
     element("undo-button").hidden = !undoId;
     const connect = element<HTMLButtonElement>("connect-from-menu");
-    connect.textContent = state?.status === "setup_required" ? "Set up Journal" : "Sign in";
+    connect.textContent = selection?.state === "usable" && state?.status === "setup_required" ? "Set up Journal" :
+      selection?.state === "usable" ? "Review access" : selection?.state === "approval_required" ? "Approve this collection" :
+      selection?.state === "approving" || state?.status === "authorizing" ? "Continue sign-in" : "Sign in";
     connect.hidden = state?.status === "closed";
-    connect.disabled = busy || !application || state?.problem === "application_not_yet_available" || state?.status === "authorizing";
+    connect.disabled = busy || !application || state?.problem === "application_not_yet_available";
     element<HTMLButtonElement>("disconnect").textContent = "Sign out";
     element<HTMLButtonElement>("disconnect").disabled = busy;
     element("disconnect").hidden = !state?.signIn || state.status === "closed";
-    const forget = element<HTMLButtonElement>("reconnect-from-menu");
-    forget.textContent = "Forget selected collection";
-    forget.hidden = !state?.selectedCollectionId || state.status === "closed";
-    forget.disabled = busy;
-    element("menu-connection").textContent = selected ? `Writing to ${name} when the SDK confirms this collection is ready.` : "Notes stay on this device until a collection is ready.";
+    const another = element<HTMLButtonElement>("reconnect-from-menu");
+    another.textContent = "Choose another collection";
+    another.hidden = (!requested && selection?.state !== "invalid") || state?.status === "closed";
+    another.disabled = busy;
+    element("menu-connection").textContent = selection?.state === "usable" && selected ? `Writing to ${name} when the SDK confirms this collection is ready.` : "Notes stay on this device until the requested collection is ready.";
     document.body.classList.toggle("undo", !!undoId);
     element("keys").textContent = /Mac|iPhone|iPad/.test(document.defaultView?.navigator.platform ?? "") ? "⌘↩" : "Ctrl+↩";
     const words = segmenter ? [...segmenter.segment(current.body)].filter(item => item.isWordLike).length : current.body.match(/\S+/g)?.length ?? 0;
@@ -200,11 +210,16 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     catch {problem = "Choose a folder within this collection that Journal can preserve on this device."; render();}
     page.focus();
   });
-  listen(choice, "change", () => {const id = choice.value; if (!application) return; void act(() => id ? application.select(id, {signal: caller.signal}) : application.clearSelection({signal: caller.signal}));});
+  listen(choice, "change", () => {const id = choice.value; if (!application) return; void act(() => id ? application.select(id, {signal: caller.signal}) : application.chooseAnother({signal: caller.signal}));});
   listen(typeChoice, "change", () => {type = types.find(item => item.name === typeChoice.value) ?? null; void save();});
-  const authorize = () => {if (application) void act(() => snapshot()?.status === "setup_required" ? application.configure({signal: caller.signal}) : application.authorize({signal: caller.signal}));};
+  const authorize = () => {
+    if (!application) return;
+    const state = snapshot(), usable = state?.selection.state === "usable";
+    void act(() => usable && state?.status === "setup_required" ? application.configure({signal: caller.signal}) :
+      usable ? application.reauthorize({signal: caller.signal}) : application.approve(undefined, {signal: caller.signal}));
+  };
   listen(element("connect-from-menu"), "click", authorize);
-  listen(element("reconnect-from-menu"), "click", () => {const id = snapshot()?.selectedCollectionId; if (application && id) void act(() => application.forget(id, {signal: caller.signal}));});
+  listen(element("reconnect-from-menu"), "click", () => {if (application) void act(() => application.chooseAnother({signal: caller.signal}));});
   listen(element("disconnect"), "click", () => {if (application) void act(() => application.close());});
   listen(element("status-button"), "click", () => {if (problem && data) void save(); else menu.showModal();});
   const foreground = () => {if (application && !disposed) {try {application.setForeground(document.visibilityState === "visible");} catch {/* unavailable owner stays unavailable */}}};

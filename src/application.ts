@@ -17,7 +17,8 @@ export function createJournalApplication(inputs: JournalApplicationInputs): Mdba
 export function journalConnection(entry: MdbaseApplicationEntry): MdbaseApplicationConnection | null {
   const snapshot = entry.application().getSnapshot();
   const id = snapshot.selectedCollectionId;
-  if (!id || snapshot.status !== "ready" || snapshot.readiness.checking || snapshot.readiness.problem !== null ||
+  if (!id || snapshot.selection.state !== "usable" || snapshot.selection.usable?.collectionId !== id ||
+      snapshot.selection.requested.collectionId !== id || !snapshot.selection.requested.approved || snapshot.status !== "ready" || snapshot.readiness.checking || snapshot.readiness.problem !== null ||
       snapshot.readiness.assessment?.status !== "ready" || snapshot.readiness.assessment.problem !== null) return null;
   const connection = entry.connection(id);
   if (!connection || connection.id !== id || connection.records.collection !== id || connection.records.hello.collection !== id ||
