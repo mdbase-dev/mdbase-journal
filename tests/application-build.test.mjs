@@ -22,12 +22,20 @@ test("consumer build retains original same-artifact Worker/native bytes and no p
     assert.equal(result.inputs,null);assert.equal(result.writingOnly,true);
     assert(Object.keys(result.sdk.inputs).every(path=>!path.includes("/testing/")));
     assert.deepEqual(Object.keys(result.application.inputs).sort(),["public/.well-known/mdbase-app.json","src/application.ts","src/drafts.ts","src/journal-data.ts","src/main.ts","src/view.ts"]);
-    for(const member of ["application/worker.js","native/sqlite3.js"]){
-      const archive=resolve(root,"vendor/mdbase-dev-sdk-563dc868.tgz");
+    for(const member of ["application/worker.js","native/sqlite3.js","native/runtime-lab.wasm","native/sqlite3.wasm"]){
+      const archive=resolve(root,"vendor/mdbase-dev-sdk-8a557ad6.tgz");
       const original=execFileSync("tar",["-xOf",archive,`package/dist/${member}`],{maxBuffer:16*1024*1024});
       assert.deepEqual(await readFile(resolve(output,"sdk",member)),original);
     }
-    await assert.rejects(buildApplication({output,env:{JOURNAL_REGISTERED_APPLICATION_ID:"build-fixture-only",JOURNAL_ENVIRONMENT:"lab",JOURNAL_ORIGIN:"https://journal.fixture"}}),/lacks packaged native assets/);
+    // Explicit fixture build inputs exercise packaging, not registration or a
+    // native browser lifecycle. Missing explicit build inputs still refuses above.
+    const native=await buildApplication({output,env:{JOURNAL_REGISTERED_APPLICATION_ID:"build-fixture-only",JOURNAL_ENVIRONMENT:"lab",JOURNAL_ORIGIN:"https://journal.fixture"}});
+    assert.equal(native.writingOnly,false);
+    assert.equal(native.inputs.registeredApplicationId,"build-fixture-only");
+    const provenance=JSON.parse(await readFile(resolve(output,"sdk/native/provenance.lab.json"),"utf8"));
+    assert.equal(provenance.runtime.source.commit,"515a7f8b17ebfb9d2d059eeda418fdc0953b5613");
+    assert.equal(provenance.runtime.sha256,"6c4ea51534b785c5165bfb671d40116535b1a60fafad035bd384708ea288de83");
+    assert.equal(provenance.verifier.clockOverride,false);
     const html=await readFile(resolve(root,"public/index.html"),"utf8");
     assert.match(html,/<script type="module" src="\.\/journal.js"><\/script>/);
     assert.doesNotMatch(html,/connect-popup|native-signin-ui|cdn.jsdelivr|callback-note/);

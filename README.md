@@ -8,7 +8,7 @@ The existing quiet writing surface, light/dark themes, folder preference and key
 
 Journal uses the public `MdbaseApplicationEntry` returned by `MdbaseConnect`. The SDK owns sign-in, popup presentation, URL selection, collection setup, readiness, the Worker and physical close. Journal subscribes to public snapshots and borrows the exact current `connection(id).records` and `connection(id).files`; it does not build another auth or storage engine.
 
-The dependency is the immutable **dev intake** at `563dc868`, not a release-qualified runtime. Its original tar and the original browser-safe Connect protocol tar are file-pinned with source/SRI in `vendor/mdbase-sdk-dev-563dc868.json`. The old SDK archive remains unchanged. Consumer bundling uses already-built public SDK modules, keeps the original Worker beside its application module and preserves the packaged module directory layout.
+The dependency is the immutable **dev intake** at `8a557ad6`, not a release-qualified runtime. Its original tar and the original browser-safe Connect protocol tar are file-pinned with source/SRI in `vendor/mdbase-sdk-dev-8a557ad6.json`. The old SDK archive remains unchanged. Consumer bundling uses already-built public SDK modules, keeps the original Worker beside its application module and preserves the packaged module directory layout.
 
 Local writing does not depend on runtime admission. Journal surfaces SDK readiness and refusals without substituting a runtime. Its native registration and browser/runtime acceptance are separate requirements, not established by this source port or fixture tests.
 
@@ -29,7 +29,7 @@ JOURNAL_ORIGIN='<approved exact origin>' \
 npm run build
 ```
 
-These are build inputs, not proof of registration. Do not derive the ID or environment from the logical manifest ID or the historical preview URL. Missing inputs fail the native build. The current SDK563 dev packet also lacks packaged runtime/SQLite WASM and contains an explicit LAB-trust refusal, so native builds refuse even with those inputs. A complete original SDK packet is required; Journal never supplies substitute assets or trust. Registration and any LAB refresh/deployment remain separately owned.
+These are build inputs, not proof of registration. Do not derive the ID or environment from the logical manifest ID or the historical preview URL. Missing inputs fail the native build. The current SDK8a dev packet contains its original runtime/SQLite WASM and canonical LAB trust (`native.available=true` describes packaged asset availability, not registration/readiness). LAB native consumer builds now succeed with explicit build inputs; without them they still refuse. Production trust remains unavailable. Journal never supplies substitute assets or trust. Registration and any LAB refresh/deployment remain separately owned.
 
 Tests use the public SDK application fixture with actual SDK clients over `MemoryReplica` for records and files. Controlled readiness/catalog metadata is test-only, not native/runtime acceptance. Type checking retains `exactOptionalPropertyTypes=true` and `skipLibCheck=false`.
 
