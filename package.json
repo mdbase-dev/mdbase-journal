@@ -3,17 +3,26 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/build-sdk.mjs",
-    "predev": "npm run build",
+    "build": "node scripts/build-application.mjs",
+    "build:local": "node scripts/build-application.mjs --writing-only",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm test && npm run build:local",
+    "predev": "npm run build:local",
     "manifest": "node scripts/build-manifest.mjs",
     "icons": "node scripts/icons.mjs",
     "dev": "python3 -m http.server -d public 8765",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node scripts/test.mjs"
   },
   "dependencies": {
-    "@mdbase-dev/sdk": "file:vendor/mdbase-dev-sdk-0.0.0-b9965703.tgz"
+    "@mdbase-dev/connect-protocol": "file:vendor/mdbase-dev-connect-protocol-0.1.0-beta.129-d765e675c3da.tgz",
+    "@mdbase-dev/sdk": "file:vendor/mdbase-dev-sdk-563dc868.tgz"
   },
   "devDependencies": {
-    "@mdbase-dev/connect-dev": "0.1.0-beta.123"
+    "@mdbase-dev/connect-dev": "0.1.0-beta.123",
+    "@types/jsdom": "21.1.7",
+    "@types/node": "22.19.1",
+    "esbuild": "0.28.1",
+    "jsdom": "26.1.0",
+    "typescript": "5.9.3"
   }
 }

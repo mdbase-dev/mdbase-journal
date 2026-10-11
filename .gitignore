@@ -1,2 +1,6 @@
 node_modules/
 public/sdk/
+public/journal.js
+.test-build-*/
+.application-build-*/
+.typed-tests-first/

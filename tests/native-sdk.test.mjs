@@ -24,10 +24,10 @@ function harness() {
   };
 }
 
-test("local build copies exactly the qualified browser asset and derives SRI", () => {
+test("local compatibility build copies the original dev archive browser asset and derives SRI", () => {
   assert.equal(createHash("sha256").update(browser).digest("hex"), SDK_ASSET.sha256);
   assert.equal(SDK_ASSET.integrity, `sha384-${createHash("sha384").update(browser).digest("base64")}`);
-  assert.equal(SDK_ASSET.sourceCommit, "b9965703230091004f17e1632fbc91bdb9edb533");
+  assert.equal(SDK_ASSET.sourceCommit, "563dc868fd5847abe272bd8cead1b044cd46fbe0");
 });
 
 test("classic-script loader returns the actual SDK public namespaces without opening a client", async () => {

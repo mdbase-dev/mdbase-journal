@@ -1,112 +1,47 @@
-# mdbase journal
+# mdbase Journal
 
-A blank page every time you open it. Each note becomes a Markdown record in an
-mdbase collection. Journal supplies only a `created` timestamp; the collection's
-type supplies its own fields and lifecycle rules. There is
-no list of old notes: open the collection in Editor or another app to read them.
+A blank page every time you open it. Notes stay on this device while you write and become Markdown records in the selected mdbase collection when the SDK confirms their original saves. Read previous notes in Editor or another collection app.
 
-Prototype. The whole app is `public/index.html`, a single page that loads the
-mdbase Connect browser SDK from jsdelivr, pinned by version and SRI hash.
+The existing quiet writing surface, light/dark themes, folder preference and keyboard controls remain. Ctrl/Cmd+Enter starts a page from the editor, not from settings. Undo new page restores the same draft for eight seconds. Every visit starts a new blank page without deleting previous drafts.
 
-- Notes are kept in `localStorage` on every keystroke and saved to the
-  collection after a short pause, retrying until the collection accepts them.
-- Every load, including a reload or a new tab, starts a new page. Leaving a page
-  open never clears it. ⌘/Ctrl+↩ starts a new page. The writing surface keeps its
-  original spacing; bottom scroll padding keeps the caret clear of the footer.
-- Writing fades the date and collection name. Scrolling, swiping, pointer
-  movement, or keyboard focus reveals controls again; on touch devices the
-  settings button stays faintly visible and tappable.
-- **New page** offers **Undo new page** for eight seconds, restoring the same
-  entry even if it has already saved. Typing on the new page, expiry, or changing
-  collections dismisses Undo. ⌘/Ctrl+↩ only starts a page from the writing surface,
-  never while a settings dialog is open.
-- `?collection=<collection-id>` selects a collection for that tab, taking
-  precedence over the device's remembered choice. Settings lists authorized
-  collections and offers **Connect another collection**; an unauthorized URL
-  selection can be connected with **Reconnect this collection**. Switching
-  updates the URL and starts a fresh page when the current entry has text.
-  Pending entries stay pinned to their original collection and save when you
-  switch back. Writing done before choosing any collection adopts the first
-  collection you connect. Other tabs keep their own selection.
-- Journal asks Connect for `collection.read`, `records.create` and
-  `records.edit`. Sign-in is Connect's ordinary web flow, in a popup so the page
-  stays put; the manifest's homepage and redirect URI are the
-  `mdbase-journal.callum-artifacts.pages.dev` alias, so sign-in works only there.
-  `public/_redirects` serves the app at `/auth/mdbase/callback` (rewritten to
-  `/`, not `/index.html`, which Pages would redirect and drop the query). The
-  popup is recognised by a marker Journal stores before opening it, because
-  Connect cuts the popup's `window.opener`. Journal's own `JournalSelection`
-  recognises the callback URL (the SDK's in-memory selection never does) and
-  remembers the chosen collection on the device while keeping selection in the
-  tab's URL.
-- `?demo` uses an in-memory collection and shows the Markdown each note produces.
+## SDK application port
 
-## Journal entries
+Journal uses the public `MdbaseApplicationEntry` returned by `MdbaseConnect`. The SDK owns sign-in, popup presentation, URL selection, collection setup, readiness, the Worker and physical close. Journal subscribes to public snapshots and borrows the exact current `connection(id).records` and `connection(id).files`; it does not build another auth or storage engine.
 
-`pack/` holds the `journal.entry` contract and a starter `journal-entry` type.
-On first connection Journal offers to add both to the collection: the contract
-stays managed by Journal, and the starter type becomes the collection's own, to
-customise in Editor (rename `created`, add fields filled in by lifecycle rules,
-such as tags).
+The dependency is the immutable **dev intake** at `563dc868`, not a release-qualified runtime. Its original tar and the original browser-safe Connect protocol tar are file-pinned with source/SRI in `vendor/mdbase-sdk-dev-563dc868.json`. The old SDK archive remains unchanged. Consumer bundling uses already-built public SDK modules, keeps the original Worker beside its application module and preserves the packaged module directory layout.
 
-Journal looks up the collection's types implementing `journal.entry` with
-`describe`, then creates each note in one write: that type, `created` under the
-type's own field name, and the body. The type's lifecycle rules fill in the rest.
-If several types implement the contract, the menu asks which one to use.
+Local writing does not depend on runtime admission. Journal surfaces SDK readiness and refusals without substituting a runtime. Its native registration and browser/runtime acceptance are separate requirements, not established by this source port or fixture tests.
 
-The starter type's schema does not require or pin the type key: Journal creates
-notes with an explicit type, so each collection records it under its own
-`explicit_type_keys` (for example `mdbase_type`). Its `match` rule only
-recognises hand-written `type: journal-entry` notes. Version 1 required `type` and
-failed in such collections; pack 0.1.1 offers v2 as a reviewed `upgrade_from`
-upgrade of the exact v1 bytes.
-
-`npm run manifest` rebuilds `public/.well-known/mdbase-app.json` from `pack/` with the
-digests pinned, and validates it.
-
-## Local native SDK preparation
-
-This workspace is local-only: no remote or deployment is authorised. The
-qualified `9ab0f31d` SDK archive is vendored and installed from a file pin.
-`npm run build` copies its exact already-built browser asset into `public/sdk/`;
-there is no bundler, repacking, CDN dependency or new SDK publication requirement.
-`public/load-native-sdk.mjs` loads that asset with SRI and returns the public
-`MdbaseSDK.Client`/`AppHost` namespaces without opening a session.
-
-See [the migration inventory](docs/new-sdk.md) for consumption, save/recovery
-requirements and the still-undelivered shared native factory/setup APIs. This is
-asset intake, **not a completed native runtime migration**. The prototype's old
-CDN/default runtime and all local draft behavior remain unchanged.
-
-## Develop
+## Develop and verify
 
 ```sh
-npm install
-npm run build        # verify pin + copy qualified SDK browser bytes, local only
-npm run dev          # builds SDK assets, then http://localhost:8765/?demo
-npm test             # legacy behavior + actual native bundle/loader tests
+npm ci --ignore-scripts
+npm run verify        # strict types, all tests, explicit writing-only build
+npm run dev           # writing-only localhost app; no native registration
 ```
 
-## Icons
-
-The icon is one row of the mdbase Frontmatter mark, its field square and
-highlighted line, centred on the same 16-unit grid: the field in Journal's green
-(`#00785a`, dark `#4cc3a0`) and the line in ink. The heavier apps use the full
-mark; Journal's single row matches its one field and a line of writing.
-Alone, the pixel grid's square field and one-unit gap look cramped, so the
-install icons use the original logo's proportions (field 12 × 10, gap 8, line 56)
-at the family's bar height. The 16px favicon stays on whole grid units.
-`scripts/icons.mjs` is adapted from mdbase-reader's icon script and regenerates
-the PNGs in `public/`; `public/favicon.svg` is written by hand.
-
-## Deploy
-
-The canonical prototype was deployed as a throwaway preview on the
-`callum-artifacts` Pages project. The command below is historical, **not
-authorisation to deploy this local SDK workspace**:
+`npm run build:local` intentionally builds only local writing. It does not invent a registered ID or enable a mock runtime. To build the native application declaration, all three approved inputs are mandatory:
 
 ```sh
-npx wrangler@4.125.0 pages deploy public --project-name callum-artifacts --branch mdbase-journal
+JOURNAL_REGISTERED_APPLICATION_ID='<registered ID>' \
+JOURNAL_ENVIRONMENT=lab \
+JOURNAL_ORIGIN='<approved exact origin>' \
+npm run build
 ```
 
-Latest: https://mdbase-journal.callum-artifacts.pages.dev
+These are build inputs, not proof of registration. Do not derive the ID or environment from the logical manifest ID or the historical preview URL. Missing inputs fail the native build. The current SDK563 dev packet also lacks packaged runtime/SQLite WASM and contains an explicit LAB-trust refusal, so native builds refuse even with those inputs. A complete original SDK packet is required; Journal never supplies substitute assets or trust. Registration and any LAB refresh/deployment remain separately owned.
+
+Tests use the public SDK application fixture with actual SDK clients over `MemoryReplica` for records and files. Controlled readiness/catalog metadata is test-only, not native/runtime acceptance. Type checking retains `exactOptionalPropertyTypes=true` and `skipLibCheck=false`.
+
+## Saving and recovery
+
+- Local drafts are persisted before any native capture. Failed persistence keeps text visible and refuses a remote write.
+- Draft destinations remain pinned across collection changes. Switching starts a blank page; the original note stays with its original collection.
+- Creation retains the original record UUID, mutation UUID and exact intent before capture. Unknown outcomes query the same receipt and record; Journal never retries creation at a sibling path.
+- Edits use the shared SDK record lease, autosave, flush and recovery. A transport reply or optimistic record is not enough to display Saved.
+- Conflicts, holds, deletion or changed remote text preserve local writing instead of recreating or overwriting another record. Closing a writing view releases only its borrowed leases, never the shared client.
+- Earlier prototype `journal.note.*` drafts remain byte-for-byte on the device and are counted in settings. They lack original native mutation identities, so the port does not silently migrate or replay them.
+
+The `journal.entry@0.1.0` contract determines creation fields. Collection-owned type names and exact semantic digest/field bindings are read from the current catalog; the starter name is never a fallback. Nested field references require shared SDK support and currently refuse saving rather than using an app-side parser. `npm run manifest` rebuilds the managed contract/starter manifest from `pack/`.
+
+No npm publication or deployment is part of this port.
