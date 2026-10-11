@@ -65,21 +65,27 @@ export class JournalDrafts {
   }
   preferences(): JournalPreferences {
     try {
-      const value: unknown = JSON.parse(this.storage.getItem("journal.prefs.v1") ?? "null");
+      const parse = (bytes: string | null): unknown => {try {return JSON.parse(bytes ?? "null");} catch {return null;}};
+      const modern = parse(this.storage.getItem("journal.prefs.v2"));
+      const oldBytes = object(modern) ? null : this.storage.getItem("journal.prefs.v1");
+      const oldCollection = object(modern) ? null : this.storage.getItem("journal.collection");
+      const value = object(modern) ? modern : parse(oldBytes);
       const preferences: JournalPreferences = {folder: object(value) && typeof value.folder === "string" ? value.folder : "journal",
         theme: object(value) && (value.theme === "light" || value.theme === "dark") ? value.theme : "system"};
       if (object(value) && object(value.entryTypes)) preferences.entryTypes = Object.fromEntries(Object.entries(value.entryTypes)
         .filter(([id, type]) => id.length <= 200 && typeof type === "string" && type.length <= 200).slice(-64)) as Record<string, string>;
-      let legacy: unknown = null;
-      try {legacy = JSON.parse(this.storage.getItem("journal.collection") ?? "null");} catch {/* A malformed legacy hint cannot reset valid preferences. */}
-      const collection = object(value) && typeof value.collectionId === "string" ? value.collectionId : legacy;
+      const collection = object(value) && typeof value.collectionId === "string" ? value.collectionId : parse(oldCollection);
       if (typeof collection === "string" && collection.length <= 200 && collection.trim()) preferences.collectionId = collection;
+      if (!object(modern) && (oldBytes !== null || oldCollection !== null)) {
+        try {this.savePreferences(preferences);} catch {/* Keep legacy choices in RAM; retry migration after storage recovers. */}
+      }
       return preferences;
     } catch { /* Defaults are writing preferences, never native authority. */ }
     return {folder: "journal", theme: "system"};
   }
   savePreferences(preferences: JournalPreferences): void {
-    try {const bytes = JSON.stringify(preferences); this.bound("journal.prefs.v1", bytes); this.storage.setItem("journal.prefs.v1", bytes);} catch {throw new DraftPersistenceError();}
+    try {const bytes = JSON.stringify(preferences); this.bound("journal.prefs.v2", bytes); this.storage.setItem("journal.prefs.v2", bytes);
+      if (this.storage.getItem("journal.prefs.v2") !== bytes) throw new DraftPersistenceError();} catch {throw new DraftPersistenceError();}
   }
   get(id: string): JournalDraft | null {
     try {

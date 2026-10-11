@@ -99,6 +99,34 @@ test("legacy entry-type and collection preferences survive theme/folder edits as
   assert.equal(drafts.preferences().entryTypes?.remembered, "custom-entry"); assert.equal(drafts.preferences().collectionId, "remembered");
   assert.equal(storage.getItem("journal.collection"), JSON.stringify("remembered"));
 });
+test("legacy settings migrate once to v2 without changing original bytes or rereading old hints", () => {
+  const storage = memoryStorage(), prefs = JSON.stringify({theme: "dark", folder: "old-writing", entryTypes: {old: "original-entry"}});
+  storage.setItem("journal.prefs.v1", prefs); storage.setItem("journal.collection", JSON.stringify("old"));
+  const expected = new JournalDrafts(storage).preferences();
+  assert(storage.getItem("journal.prefs.v2")); assert.equal(storage.getItem("journal.prefs.v1"), prefs);
+  const get = storage.getItem;
+  storage.getItem = key => {if (key === "journal.prefs.v1" || key === "journal.collection") throw new Error("legacy key read again"); return get(key);};
+  assert.deepEqual(new JournalDrafts(storage).preferences(), expected);
+});
+test("an intentionally cleared modern collection hint cannot resurrect the old collection", () => {
+  const storage = memoryStorage(); storage.setItem("journal.collection", JSON.stringify("old"));
+  const drafts = new JournalDrafts(storage); assert.equal(drafts.preferences().collectionId, "old");
+  drafts.savePreferences({folder: "new", theme: "system"});
+  assert.deepEqual(new JournalDrafts(storage).preferences(), {folder: "new", theme: "system"});
+});
+test("quota during preference migration retains legacy choices and retries safely", () => {
+  const storage = memoryStorage(), bytes = JSON.stringify({theme: "light", folder: "original", entryTypes: {old: "custom"}});
+  storage.setItem("journal.prefs.v1", bytes); const set = storage.setItem;
+  storage.setItem = () => {throw new Error("quota");};
+  const first = new JournalDrafts(storage).preferences(); assert.equal(first.folder, "original");
+  assert.equal(storage.getItem("journal.prefs.v2"), null); assert.equal(storage.getItem("journal.prefs.v1"), bytes);
+  storage.setItem = set; assert.deepEqual(new JournalDrafts(storage).preferences(), first);
+  assert.deepEqual(JSON.parse(storage.getItem("journal.prefs.v2")!), first);
+});
+test("preference reads on a fresh empty visit allocate no storage", () => {
+  const storage = memoryStorage(); assert.deepEqual(new JournalDrafts(storage).preferences(), {theme: "system", folder: "journal"});
+  assert.equal(storage.length, 0);
+});
 test("malformed legacy collection hint does not reset valid preferences", () => {
   const storage = memoryStorage(); storage.setItem("journal.collection", "invalid json");
   storage.setItem("journal.prefs.v1", JSON.stringify({theme: "dark", folder: "writing"}));

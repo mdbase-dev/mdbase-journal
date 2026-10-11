@@ -27,7 +27,12 @@ Coordinator co0578 / co0636: rows 12, 16, 17 and 20.
   pruned. New visits proactively reclaim eligible old confirmed copies even
   below the cap; cleanup is best-effort and never interrupts writing. Tests
   exercise the actual default 256-entry and 3 MiB limits, not only small budgets.
-- Existing theme/folder/type preferences survive. A saved type is restored only
+- Existing theme/folder/type preferences survive. Legacy `journal.prefs.v1`
+  and `journal.collection` migrate once to `journal.prefs.v2`; original bytes
+  remain, but modern preferences never re-read or resurrect old choices.
+  Storage failure retains the legacy choices and retries migration safely;
+  a fresh visit with no legacy preferences allocates no storage.
+  A saved type is restored only
   if it exists in the current canonical catalog. SDK memory/URL owns collection
   selection; a legacy last-collection hint offers an explicit SDK selection
   action, never an automatic approval, fallback, or URL override.
