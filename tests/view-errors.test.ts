@@ -8,7 +8,38 @@ import {journalConnection} from "../src/application.js";
 import {mountJournal} from "../src/view.js";
 import {applicationFixture, catalog, deferred, memoryStorage} from "./support.js";
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
-test("only SDK-validated HTTPS update links are offered, and stale links are removed", async () => {
+for (const reason of ["refused", "expired"]) void test(`SDK ${reason} sign-in uses exact copy and an enabled approval gesture`, async () => {
+  const f = await applicationFixture();
+  const state = {...f.ready, status: "blocked" as const, problem: reason, selectedCollectionId: null,
+    selection: {...f.ready.selection, state: "none" as const, usable: null, requested: {...f.ready.selection.requested, collectionId: null}}};
+  f.fixture.controls.publishSnapshot(state);
+  const copy = describeError(state); assert(copy?.actionLabel);
+  const window = new JSDOM(html, {runScripts: "outside-only"}).window;
+  const view = mountJournal(window.document, new JournalDrafts(memoryStorage()), f.fixture.entry);
+  try {
+    const explanation = window.document.getElementById("menu-connection")!.textContent!;
+    assert(explanation.includes(copy.title)); assert(explanation.includes(copy.message));
+    const signIn = window.document.querySelector<HTMLButtonElement>("#connect-from-menu")!;
+    assert.equal(signIn.textContent, copy.actionLabel); assert.equal(signIn.disabled, false);
+    signIn.click();
+    assert.equal(f.fixture.controls.observedActions().filter(call => call.action === "approve").length, 1);
+    assert.equal(f.fixture.controls.observedActions().some(call => call.action === "authorize"), false);
+  } finally {view.dispose(); window.close(); f.close();}
+});
+void test("authorizing still offers an enabled explicit SDK approval gesture", async () => {
+  const f = await applicationFixture();
+  f.fixture.controls.publishSnapshot({...f.ready, status: "authorizing", selectedCollectionId: null,
+    selection: {...f.ready.selection, state: "none", usable: null, requested: {...f.ready.selection.requested, collectionId: null}}});
+  const window = new JSDOM(html, {runScripts: "outside-only"}).window;
+  const view = mountJournal(window.document, new JournalDrafts(memoryStorage()), f.fixture.entry);
+  try {
+    const signIn = window.document.querySelector<HTMLButtonElement>("#connect-from-menu")!;
+    assert.equal(signIn.textContent, "Sign in"); assert.equal(signIn.disabled, false);
+    signIn.click();
+    assert.equal(f.fixture.controls.observedActions().filter(call => call.action === "approve").length, 1);
+  } finally {view.dispose(); window.close(); f.close();}
+});
+void test("only SDK-validated HTTPS update links are offered, and stale links are removed", async () => {
   const f = await applicationFixture(), window = new JSDOM(html, {runScripts: "outside-only"}).window;
   f.fixture.controls.publishSnapshot({...f.ready, status: "blocked"});
   const view = mountJournal(window.document, new JournalDrafts(memoryStorage()), f.fixture.entry);
@@ -30,7 +61,7 @@ test("only SDK-validated HTTPS update links are offered, and stale links are rem
     assert.equal(link.hidden, true); assert.equal(link.hasAttribute("href"), false);
   } finally {view.dispose(); window.close(); f.close();}
 });
-test("registration diagnostics stay developer-only instead of appearing on the writing surface", async () => {
+void test("registration diagnostics stay developer-only instead of appearing on the writing surface", async () => {
   const f = await applicationFixture(), window = new JSDOM(html, {runScripts: "outside-only"}).window;
   const state = {...f.ready, status: "blocked" as const, problem: "application_registration_refused", problemDetail: {
     name: "MdbaseError", code: "application_registration_refused", registration: {code: "invalid_manifest", paths: ["/homepage", "/icon"]}}};
@@ -44,7 +75,7 @@ test("registration diagnostics stay developer-only instead of appearing on the w
     assert.equal(window.document.getElementById("status")!.textContent, copy.title);
   } finally {view.dispose(); window.close(); f.close();}
 });
-for (const problem of ["collection_migrating", "update_required", "account_suspended"]) test(`live ${problem} uses SDK copy without fencing local writing`, async () => {
+for (const problem of ["collection_migrating", "update_required", "account_suspended"]) void test(`live ${problem} uses SDK copy without fencing local writing`, async () => {
   const f = await applicationFixture(), job = deferred<ReturnType<typeof catalog>>();
   const describe = mock.method(f.records, "describe", () => job.promise);
   const window = new JSDOM(html, {runScripts: "outside-only"}).window;
@@ -70,7 +101,7 @@ for (const problem of ["collection_migrating", "update_required", "account_suspe
     assert(!window.document.getElementById("menu-connection")!.textContent!.includes(copy.title), "accepted reply clears live problem copy");
   } finally {view.dispose(); describe.mock.restore(); job.resolve(catalog()); window.close(); f.close();}
 });
-for (const problem of ["application_native_profile_unavailable", "update_required"]) test(`requested collection stays visible with ${problem} and an action`, async () => {
+for (const problem of ["application_native_profile_unavailable", "update_required"]) void test(`requested collection stays visible with ${problem} and an action`, async () => {
   const f = await applicationFixture(), window = new JSDOM(html, {runScripts: "outside-only"}).window;
   const other = {collectionId: "other", displayName: "Other collection", role: "owner" as const};
   f.fixture.controls.publishSnapshot({...f.ready, status: "blocked", problem, collections: [...f.ready.collections, other],

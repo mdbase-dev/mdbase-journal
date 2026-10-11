@@ -29,6 +29,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
   let type: JournalEntryType | null = null;
   let problem: string | null = null;
   let busy = false;
+  let pendingActions = 0;
+  let latestAction = 0;
   let disposed = false;
   let undoId: string | null = null;
   let undoTimer: ReturnType<typeof setTimeout> | null = null;
@@ -149,11 +151,13 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     element("new-button").hidden = !current.body.trim();
     element("undo-button").hidden = !undoId;
     const connect = element<HTMLButtonElement>("connect-from-menu");
-    connect.textContent = selection?.state === "usable" && state?.status === "setup_required" ? "Set up Journal" :
-      selection?.state === "usable" ? "Review access" : selection?.state === "approval_required" ? "Approve this collection" :
-      selection?.state === "approving" || state?.status === "authorizing" ? "Continue sign-in" : "Sign in";
+    const authorizing = selection?.state === "approving" || state?.status === "authorizing";
+    const signInAction = description?.action === "sign_in" || authorizing || selection?.state !== "usable";
+    connect.textContent = description?.action === "sign_in" ? description.actionLabel ?? "Sign in" :
+      authorizing ? "Sign in" : selection?.state === "usable" && state?.status === "setup_required" ? "Set up Journal" :
+      selection?.state === "usable" ? "Review access" : selection?.state === "approval_required" ? "Approve this collection" : "Sign in";
     connect.hidden = state?.status === "closed";
-    connect.disabled = busy || !application || state?.problem === "application_not_yet_available";
+    connect.disabled = (busy && !signInAction) || !application || state?.problem === "application_not_yet_available";
     element<HTMLButtonElement>("disconnect").textContent = "Sign out";
     element<HTMLButtonElement>("disconnect").disabled = busy;
     element("disconnect").hidden = !state?.signIn || state.status === "closed";
@@ -174,12 +178,14 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     element("word-count").hidden = words === 0;
   }
   /** Invoke synchronously in the gesture stack. SDK reserves its own popup. */
-  async function act(action: () => Promise<unknown>): Promise<void> {
-    if (disposed || busy) return;
-    busy = true; problem = null; actionProblem = null;
+  async function act(action: () => Promise<unknown>, signIn = false): Promise<void> {
+    if (disposed || (busy && !signIn)) return;
+    // Only SDK sign-in gestures bypass the presentation busy flag.
+    const ordinal = ++latestAction;
+    pendingActions++; busy = true; problem = null; actionProblem = null;
     try {const pending = action(); render(); await pending; caller.signal.throwIfAborted();}
-    catch (error) {if (!caller.signal.aborted) actionProblem = describeError(error) ?? describeError("internal");}
-    finally {if (!caller.signal.aborted) {busy = false; render();}}
+    catch (error) {if (!caller.signal.aborted && ordinal === latestAction) actionProblem = describeError(error) ?? describeError("internal");}
+    finally {pendingActions--; if (!caller.signal.aborted) {busy = pendingActions > 0; render();}}
   }
   function newPage(): void {
     if (!current.body.trim()) {page.focus(); return;}
@@ -310,8 +316,9 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
   const authorize = () => {
     if (!application) return;
     const state = snapshot(), usable = state?.selection.state === "usable";
-    void act(() => usable && state?.status === "setup_required" ? application.configure({signal: caller.signal}) :
-      usable ? application.reauthorize({signal: caller.signal}) : application.approve(undefined, {signal: caller.signal}));
+    const signIn = describeError(state)?.action === "sign_in" || state?.status === "authorizing" || state?.selection.state === "approving" || !usable;
+    void act(() => signIn ? application.approve(undefined, {signal: caller.signal}) :
+      state?.status === "setup_required" ? application.configure({signal: caller.signal}) : application.reauthorize({signal: caller.signal}), signIn);
   };
   listen(element("connect-from-menu"), "click", authorize);
   listen(element("reconnect-from-menu"), "click", () => {if (application) void act(() => application.chooseAnother({signal: caller.signal}));});

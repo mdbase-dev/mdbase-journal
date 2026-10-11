@@ -23,7 +23,7 @@ test("consumer build retains original same-artifact Worker/native bytes and no p
     assert(Object.keys(result.sdk.inputs).every(path=>!path.includes("/testing/")));
     assert.deepEqual(Object.keys(result.application.inputs).sort(),["public/.well-known/mdbase-app.json","src/application.ts","src/draft-opens.ts","src/drafts.ts","src/journal-data.ts","src/main.ts","src/returning-notice.ts","src/view.ts"]);
     for(const member of ["application/worker.js","native/sqlite3.js","native/runtime-lab.wasm","native/sqlite3.wasm"]){
-      const archive=resolve(root,"vendor/mdbase-dev-sdk-41c26ca7.tgz");
+      const archive=resolve(root,"vendor/mdbase-dev-sdk-4c484d3c.tgz");
       const original=execFileSync("tar",["-xOf",archive,`package/dist/${member}`],{maxBuffer:16*1024*1024});
       assert.deepEqual(await readFile(resolve(output,"sdk",member)),original);
     }
