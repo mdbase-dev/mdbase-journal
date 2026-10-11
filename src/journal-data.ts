@@ -35,6 +35,7 @@ export class JournalData {
   private readonly opening = new Map<string, Promise<RecordLease>>();
   private readonly listeners = new Set<() => void>();
   private readonly unsubscriptions = new Map<string, () => void>();
+  private readonly unpins = new Map<string, () => void>();
   private readonly problems = new Map<string, string>();
   private disposed = false;
   constructor(readonly connection: MdbaseApplicationConnection, private readonly drafts: JournalDrafts) {
@@ -44,6 +45,7 @@ export class JournalData {
   private notify(): void {for (const listener of this.listeners) listener();}
   private ensure(draft?: JournalDraft): void {
     this.caller.signal.throwIfAborted();
+    if (draft?.legacyKey) throw new Error("This earlier note needs its original save reviewed. Your text is still on this device.");
     if (this.disposed || !this.connection.isCurrent()) throw new Error("This collection has changed. Your text is still on this device.");
     if (draft?.targetCollectionId && draft.targetCollectionId !== this.connection.id) throw new Error("This note belongs to another collection.");
     const attempt = draft?.createAttempt;
@@ -64,9 +66,13 @@ export class JournalData {
     if (existing) return existing;
     const job = this.opening.get(id);
     if (job) return job;
+    const unpin = this.drafts.pin(id); this.unpins.set(id, unpin);
     const pending = this.acquire(id, type);
     this.opening.set(id, pending);
-    try {return await pending;} finally {if (this.opening.get(id) === pending) this.opening.delete(id);}
+    try {return await pending;} finally {
+      if (this.opening.get(id) === pending) this.opening.delete(id);
+      if (!this.leases.has(id)) {unpin(); if (this.unpins.get(id) === unpin) this.unpins.delete(id);}
+    }
   }
   private async acquire(id: string, type: JournalEntryType): Promise<RecordLease> {
     let draft = this.drafts.get(id);
@@ -162,6 +168,7 @@ export class JournalData {
     this.unsubscriptions.clear();
     for (const lease of this.leases.values()) lease.release();
     this.leases.clear(); this.listeners.clear(); this.problems.clear();
+    for (const unpin of this.unpins.values()) unpin(); this.unpins.clear();
     // Borrowed clients and SDK singleton are never closed by a writing view.
   }
 }

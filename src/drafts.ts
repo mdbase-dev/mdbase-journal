@@ -22,6 +22,8 @@ export interface JournalDraft {
   recovery: {mutationId: string; recordId: string; baseRevision: string | null} | null;
   finished: boolean;
   touchedMs: number;
+  /** Prototype text has no original native capture identity. Import is local only. */
+  legacyKey?: string;
 }
 export type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem" | "key" | "length">;
 const prefix = "journal.native.note.";
@@ -32,6 +34,7 @@ function validDraft(value: unknown): value is JournalDraft {
   if (!object(value) || !uuid(value.id) || typeof value.created !== "string" || !Number.isFinite(Date.parse(value.created)) || !Number.isFinite(value.createdMs) ||
       typeof value.body !== "string" || value.body.length > 4 * 1024 * 1024 || !textOrNull(value.path) || !textOrNull(value.targetCollectionId) ||
       !textOrNull(value.recordId) || !textOrNull(value.savedBody) || typeof value.finished !== "boolean" || !Number.isFinite(value.touchedMs)) return false;
+  if (value.legacyKey !== undefined && (typeof value.legacyKey !== "string" || !value.legacyKey.startsWith("journal.note.") || value.legacyKey.length > 1024 || value.createAttempt !== null || value.recordId !== null || value.recovery !== null)) return false;
   const attempt = value.createAttempt;
   if (attempt !== null && (!object(attempt) || ["body", "typeName", "createdField", "path", "created", "account", "installation"].some(key => typeof attempt[key] !== "string") ||
       !uuid(attempt.mutationId) || !uuid(attempt.recordId) || attempt.created !== value.created || attempt.path !== value.path || !value.targetCollectionId)) return false;
@@ -45,18 +48,38 @@ export class DraftPersistenceError extends Error {
 }
 /** Local writing is independent of registration and native readiness. Failed
  * persistence is never permission to capture a remote write or clear text. */
+export interface JournalPreferences {
+  folder: string;
+  theme: "system" | "light" | "dark";
+  entryTypes?: Record<string, string>;
+  /** Presentation hint only; selecting it still delegates to the SDK. */
+  collectionId?: string;
+}
 export class JournalDrafts {
-  constructor(private readonly storage: DraftStorage) {}
-  preferences(): {folder: string; theme: "system" | "light" | "dark"} {
+  private readonly pins = new Map<string, number>();
+  constructor(private readonly storage: DraftStorage, private readonly limits = {maxBytes: 3 * 1024 * 1024, maxDrafts: 256}) {}
+  pin(id: string): () => void {
+    this.pins.set(id, (this.pins.get(id) ?? 0) + 1);
+    let released = false;
+    return () => {if (released) return; released = true; const count = (this.pins.get(id) ?? 1) - 1; if (count) this.pins.set(id, count); else this.pins.delete(id);};
+  }
+  preferences(): JournalPreferences {
     try {
       const value: unknown = JSON.parse(this.storage.getItem("journal.prefs.v1") ?? "null");
-      if (object(value)) return {folder: typeof value.folder === "string" ? value.folder : "journal",
-        theme: value.theme === "light" || value.theme === "dark" ? value.theme : "system"};
+      const preferences: JournalPreferences = {folder: object(value) && typeof value.folder === "string" ? value.folder : "journal",
+        theme: object(value) && (value.theme === "light" || value.theme === "dark") ? value.theme : "system"};
+      if (object(value) && object(value.entryTypes)) preferences.entryTypes = Object.fromEntries(Object.entries(value.entryTypes)
+        .filter(([id, type]) => id.length <= 200 && typeof type === "string" && type.length <= 200).slice(-64)) as Record<string, string>;
+      let legacy: unknown = null;
+      try {legacy = JSON.parse(this.storage.getItem("journal.collection") ?? "null");} catch {/* A malformed legacy hint cannot reset valid preferences. */}
+      const collection = object(value) && typeof value.collectionId === "string" ? value.collectionId : legacy;
+      if (typeof collection === "string" && collection.length <= 200 && collection.trim()) preferences.collectionId = collection;
+      return preferences;
     } catch { /* Defaults are writing preferences, never native authority. */ }
     return {folder: "journal", theme: "system"};
   }
-  savePreferences(preferences: {folder: string; theme: "system" | "light" | "dark"}): void {
-    try {this.storage.setItem("journal.prefs.v1", JSON.stringify(preferences));} catch {throw new DraftPersistenceError();}
+  savePreferences(preferences: JournalPreferences): void {
+    try {const bytes = JSON.stringify(preferences); this.bound("journal.prefs.v1", bytes); this.storage.setItem("journal.prefs.v1", bytes);} catch {throw new DraftPersistenceError();}
   }
   get(id: string): JournalDraft | null {
     try {
@@ -71,10 +94,34 @@ export class JournalDrafts {
     if (!validDraft(draft)) throw new DraftPersistenceError();
     const bytes = JSON.stringify(draft);
     try {
+      this.bound(prefix + draft.id, bytes);
       this.storage.setItem(prefix + draft.id, bytes);
       if (this.storage.getItem(prefix + draft.id) !== bytes) throw new DraftPersistenceError();
     } catch {throw new DraftPersistenceError();}
     return draft;
+  }
+  /** Evict only old, finished, confirmed native copies, never writing/recovery
+   * text, imported text, pinned SDK leases, or another application's storage. */
+  private bound(key: string, bytes: string): void {
+    const entries = new Map<string, string>();
+    for (let i = 0; i < this.storage.length; i++) {
+      const name = this.storage.key(i);
+      if (name?.startsWith("journal.")) entries.set(name, this.storage.getItem(name) ?? "");
+    }
+    entries.set(key, bytes);
+    const size = () => [...entries].reduce((total, [name, value]) => total + 2 * (name.length + value.length), 0);
+    const count = () => [...entries.keys()].filter(name => name.startsWith(prefix)).length;
+    if (size() <= this.limits.maxBytes && count() <= this.limits.maxDrafts) return;
+    for (const draft of this.list().sort((a, b) => a.touchedMs - b.touchedMs)) {
+      if (draft.id === key.slice(prefix.length) || this.pins.has(draft.id) || !draft.finished || !draft.recordId || draft.recovery || draft.legacyKey || draft.body !== draft.savedBody || draft.touchedMs > Date.now() - 6 * 60 * 60 * 1000) continue;
+      const name = prefix + draft.id;
+      if (this.storage.getItem(name) !== entries.get(name)) continue;
+      this.storage.removeItem(name);
+      if (this.storage.getItem(name) !== null) throw new DraftPersistenceError();
+      entries.delete(name);
+      if (size() <= this.limits.maxBytes && count() <= this.limits.maxDrafts) return;
+    }
+    throw new DraftPersistenceError();
   }
   patch(id: string, patch: Partial<JournalDraft>): JournalDraft {
     const draft = this.get(id);
@@ -101,14 +148,40 @@ export class JournalDrafts {
   create(collectionId: string | null, now = new Date()): JournalDraft {
     return this.put(this.blank(collectionId, now));
   }
-  /** Older prototype drafts are left byte-for-byte intact. They lack original
-   * native write identities, so this port never silently retries/migrates them. */
+  /** Import pending prototype writing once per source key. Original bytes and
+   * destination survive; missing native identities never become new writes. */
+  importLegacy(): void {
+    const imported = new Set(this.list().flatMap(draft => draft.legacyKey ? [draft.legacyKey] : []));
+    const keys: string[] = [];
+    for (let i = 0; i < this.storage.length; i++) {const key = this.storage.key(i); if (key?.startsWith("journal.note.")) keys.push(key);}
+    let failed = false;
+    for (const key of keys) {
+      if (imported.has(key)) continue;
+      let value: unknown;
+      try {value = JSON.parse(this.storage.getItem(key) ?? "null");} catch {continue;}
+      if (!object(value) || typeof value.body !== "string" || !value.body.trim() || value.body === value.savedBody) continue;
+      const date = typeof value.created === "string" && Number.isFinite(Date.parse(value.created)) ? new Date(value.created) :
+        typeof value.createdMs === "number" && Number.isFinite(value.createdMs) ? new Date(value.createdMs) : new Date();
+      const draft = this.blank(typeof value.targetCollectionId === "string" ? value.targetCollectionId : typeof value.createdIn === "string" ? value.createdIn : null, date);
+      if (uuid(value.id) && !this.get(value.id)) Object.assign(draft, {id: value.id});
+      try {
+        this.put({...draft, body: value.body, path: typeof value.path === "string" ? value.path : null,
+          created: typeof value.created === "string" && Number.isFinite(Date.parse(value.created)) ? value.created : draft.created,
+          createdMs: typeof value.createdMs === "number" && Number.isFinite(value.createdMs) && Number.isFinite(new Date(value.createdMs).getTime()) ? value.createdMs : draft.createdMs,
+          touchedMs: typeof value.touchedMs === "number" && Number.isFinite(value.touchedMs) ? value.touchedMs : draft.touchedMs,
+          finished: true, legacyKey: key});
+        imported.add(key);
+      } catch {failed = true;}
+    }
+    if (failed) throw new DraftPersistenceError();
+  }
   legacyPendingCount(): number {
     let count = 0;
     try {
+      const imported = new Set(this.list().flatMap(draft => draft.legacyKey ? [draft.legacyKey] : []));
       for (let i = 0; i < this.storage.length; i++) {
         const key = this.storage.key(i);
-        if (!key?.startsWith("journal.note.")) continue;
+        if (!key?.startsWith("journal.note.") || imported.has(key)) continue;
         const data: unknown = JSON.parse(this.storage.getItem(key) ?? "null");
         if (data && typeof data === "object" && "body" in data && typeof data.body === "string" && data.body.trim() && (!("savedBody" in data) || data.savedBody !== data.body)) count++;
       }
@@ -121,8 +194,9 @@ export function localIso(date: Date): string {
   const offset = -date.getTimezoneOffset();
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${offset >= 0 ? "+" : "-"}${pad(Math.floor(Math.abs(offset) / 60))}:${pad(Math.abs(offset) % 60)}`;
 }
-export function notePath(date: Date, folder: string): string {
+export function notePath(date: Date, folder: string, draftId?: string): string {
+  if (draftId !== undefined && !uuid(draftId)) throw new Error("The original local note identity is missing.");
   const root = folder.trim().replace(/^\/+|\/+$/g, "");
   if (root.split("/").some(part => part === "." || part === "..") || /[\u0000-\u001f\u007f\\]/.test(root)) throw new Error("Choose a folder within this collection.");
-  return `${root ? root + "/" : ""}${date.getFullYear()}/${pad(date.getMonth() + 1)}/${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}.md`;
+  return `${root ? root + "/" : ""}${date.getFullYear()}/${pad(date.getMonth() + 1)}/${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}${draftId ? `-${draftId}` : ""}.md`;
 }

@@ -1,0 +1,39 @@
+# Journal draft update audits
+
+Coordinator co0578 / co0636: rows 12, 16, 17 and 20.
+
+- Each draft independently acquires its original SDK record lease. One rejected
+  acquisition or indefinitely pending confirmation does not block later notes.
+  Failed acquisition backs off from one second to one minute. Once a create
+  intent exists, recovery only reads its original receipt/record; it never
+  resubmits creation, chooses a sibling path or replaces SDK autosave.
+- Settings show each pending entry's state and offer local writing restoration.
+  Readiness notifications for the same selection cannot clear restored text.
+  An actual SDK selection change still preserves and pins the old note.
+- Pending `journal.note.*` writing imports once per source key. Original bytes,
+  text, dates, path and known destination remain intact. Prototype entries lack
+  original native capture identities: imported text stays local and explicitly
+  needs original-save review, even when edited. It is never automatically sent
+  as a new native record. Oversized entries cannot block importing smaller ones.
+- New empty visits/pages allocate an in-memory draft, not a localStorage entry.
+  The first input must persist before any remote capture. Undo retains the same
+  old draft identity. New pages allocate unique initial filenames before capture;
+  existing paths and uncertain intents never change.
+- Journal-owned storage is bounded to 3 MiB (UTF-16 key/value accounting) and 256
+  native draft entries. Only finished, confirmed copies older than six hours can
+  be evicted. Unsaved, recovery, imported and live-lease-pinned copies remain;
+  exceeding the bound refuses persistence and keeps current RAM text visible
+  with the existing keep-page-open warning. Other applications' storage is not
+  pruned.
+- Existing theme/folder/type preferences survive. A saved type is restored only
+  if it exists in the current canonical catalog. SDK memory/URL owns collection
+  selection; a legacy last-collection hint offers an explicit SDK selection
+  action, never an automatic approval, fallback, or URL override.
+
+Verification: strict TypeScript, 75 Node tests and writing-only build. Tests use
+actual SDK record CRUD with MemoryReplica and controlled catalog/status metadata;
+these are not native runtime, registration or delivery qualification. The build
+checks original SDK Worker/native archive bytes and an exact application graph.
+There is no separate lint script. Browser checks remain queued under the shared
+lease/HOLD. SDK error/status helpers and unavailable-collection actions wait for
+coordinated intake of the new qualified SDK cut (co0597/co0605).

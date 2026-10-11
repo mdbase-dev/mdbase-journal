@@ -2,6 +2,7 @@ import type {MdbaseApplicationEntry, MdbaseApplicationSnapshot} from "@mdbase-de
 import {journalConnection} from "./application.js";
 import {DraftPersistenceError, JournalDrafts, notePath, type JournalDraft} from "./drafts.js";
 import {JournalData, type JournalEntryType} from "./journal-data.js";
+import {DraftOpens} from "./draft-opens.js";
 export interface JournalView {dispose(): void; currentDraft(): JournalDraft; newPage(): void; undoNewPage(): void}
 /** Typed presentation over the public singleton. Local text never depends on
  * sign-in; the view only releases its subscriptions and borrowed record leases. */
@@ -20,6 +21,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
   const caller = new (document.defaultView?.AbortController ?? AbortController)();
   const application = entry?.application() ?? null;
   let data: JournalData | null = null;
+  let opens: DraftOpens | null = null;
   let unlistenData: (() => void) | null = null;
   let types: JournalEntryType[] = [];
   let type: JournalEntryType | null = null;
@@ -29,12 +31,13 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
   let undoId: string | null = null;
   let undoTimer: ReturnType<typeof setTimeout> | null = null;
   let memoryOnly = false;
-  let unpersistedDraft = false;
+  let unpersistedDraft = true;
   const preferences = drafts.preferences();
   let folder = preferences.folder;
   const segmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, {granularity: "word"}) : null;
-  let current = drafts.blank(application?.getSnapshot().selectedCollectionId ?? null);
-  try {current = drafts.put(current);} catch {memoryOnly = true; unpersistedDraft = true; problem = "Keep this page open: Journal cannot preserve its text on this device.";}
+  let observedCollectionId = application?.getSnapshot().selectedCollectionId ?? null;
+  let current = drafts.blank(observedCollectionId);
+  try {drafts.importLegacy();} catch {problem = "Earlier notes could not be copied on this device. Their original text is still preserved.";}
   const listen = (target: EventTarget, name: string, handler: EventListener) => target.addEventListener(name, handler, {signal: caller.signal});
   const snapshot = (): MdbaseApplicationSnapshot | null => application?.getSnapshot() ?? null;
   function clearUndo(): void {undoId = null; if (undoTimer !== null) clearTimeout(undoTimer); undoTimer = null;}
@@ -57,6 +60,9 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     let unresolved: JournalDraft[] = [];
     try {unresolved = drafts.list().filter(draft => !!draft.body.trim() && draft.body !== draft.savedBody);} catch {problem = "Keep this page open: Journal cannot read its drafts on this device.";}
     let message = problem ?? data?.problem(current.id);
+    const opening = opens?.state(current.id);
+    if (!message && current.legacyKey) message = "Earlier note: review its original save. Your text stays on this device.";
+    if (!message && opening) message = opening.state === "retrying" ? "The original save is unresolved. Your text stays on this device; checking again." : "Saving…";
     if (!message && record) {
       message = record.state === "saved" && current.body === current.savedBody ? "Saved" : record.state === "saving" ? "Saving…" :
         ["conflict", "recovery", "deleted", "error"].includes(record.state) ? "Your text is on this device. Resolve its original save before continuing." : "On this device";
@@ -78,6 +84,22 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     const legacy = drafts.legacyPendingCount();
     pending.textContent = `${unresolved.length} note${unresolved.length === 1 ? "" : "s"} on this device${other ? `; ${other} waiting for another collection` : ""}${legacy ? `; ${legacy} earlier prototype note${legacy === 1 ? "" : "s"} preserved separately` : ""}`;
     element("pending-row").hidden = !unresolved.length && !legacy && !memoryOnly;
+    const details = element("pending-details");
+    details.replaceChildren(...unresolved.map(draft => {
+      const row = document.createElement("div"); row.className = "pending-entry";
+      const text = document.createElement("small"), saving = opens?.state(draft.id), record = data?.snapshot(draft.id);
+      const state = draft.legacyKey ? "Earlier note: original save needs review" :
+        draft.targetCollectionId && draft.targetCollectionId !== selected?.collectionId ? "Waiting for its collection" :
+        data?.problem(draft.id) ? "Original save needs attention" : saving?.state === "retrying" ? "Original save unresolved; checking again" :
+        saving?.state === "opening" || record?.state === "saving" ? "Saving…" :
+        record && ["conflict", "recovery", "deleted", "error"].includes(record.state) ? "Original save needs attention" : "On this device";
+      text.textContent = `${new Date(draft.createdMs).toLocaleString()} — ${state}`; row.append(text);
+      if (draft.id !== current.id) {
+        const resume = document.createElement("button"); resume.type = "button"; resume.textContent = "Resume writing";
+        resume.disabled = memoryOnly; resume.onclick = () => restoreDraft(draft.id); row.append(resume);
+      }
+      return row;
+    }));
     element("collection-name").textContent = selected?.displayName ?? "";
     element("collection-name").hidden = !selected;
     const collections = state?.collections ?? [];
@@ -87,6 +109,11 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
       ...(requested && !collections.some(item => item.collectionId === requested) ? [option("Requested collection (approval needed)", requested)] : []));
     choice.value = requested ?? "";
     choice.disabled = memoryOnly || busy || !application || state?.status === "closed";
+    const previous = element<HTMLButtonElement>("last-collection");
+    previous.hidden = !!requested || !preferences.collectionId || !application || state?.status === "closed";
+    previous.disabled = memoryOnly || busy;
+    const previousName = collections.find(item => item.collectionId === preferences.collectionId)?.displayName;
+    previous.textContent = previousName ? `Open ${previousName}` : "Open last used collection";
     typeChoice.replaceChildren(option("Choose a type…", ""), ...types.map(item => option(item.name, item.name)));
     typeChoice.value = type?.name ?? "";
     element("type-row").hidden = types.length < 2;
@@ -125,9 +152,9 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     if (memoryOnly) {problem = "Keep this page open: its text has not been preserved on this device."; render(); return;}
     const previous = current;
     try {
-      const next = drafts.create(snapshot()?.selectedCollectionId ?? null);
-      drafts.patch(previous.id, {finished: true});
-      current = next;
+      const next = drafts.blank(snapshot()?.selectedCollectionId ?? null);
+      drafts.patch(previous.id, {finished: true, touchedMs: Date.now()});
+      current = next; unpersistedDraft = true;
       clearUndo(); undoId = previous.id;
       undoTimer = setTimeout(() => {clearUndo(); render();}, 8000);
       problem = null; renderPage(); render(); page.focus();
@@ -137,46 +164,61 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     if (!undoId || current.body.trim()) return;
     const previous = drafts.get(undoId);
     if (!previous || previous.targetCollectionId !== snapshot()?.selectedCollectionId && snapshot()?.selectedCollectionId !== undefined) {clearUndo(); render(); return;}
-    try {current = drafts.patch(previous.id, {finished: false}); clearUndo(); renderPage(); render(); page.focus();}
+    try {current = drafts.patch(previous.id, {finished: false}); unpersistedDraft = false; clearUndo(); renderPage(); render(); page.focus();}
     catch {problem = "Keep this page open: Journal cannot restore the previous draft safely."; render();}
   }
-  async function save(): Promise<void> {
-    const owned = data, selectedType = type;
-    if (!owned || !selectedType || disposed || memoryOnly) return;
+  function restoreDraft(id: string): void {
+    if (disposed || memoryOnly) return;
     try {
-      for (const draft of drafts.list().filter(item => !!item.body.trim() && item.body !== item.savedBody && (!item.targetCollectionId || item.targetCollectionId === owned.connection.id))) {
-        await owned.open(draft.id, selectedType);
-        if (data !== owned || disposed) return;
-      }
-      problem = null;
-    } catch (error) {if (data === owned && !disposed) problem = error instanceof Error ? error.message : "Your note remains on this device.";}
+      const earlier = drafts.get(id);
+      if (!earlier) throw new DraftPersistenceError();
+      if (current.body.trim()) drafts.patch(current.id, {finished: true, touchedMs: Date.now()});
+      current = drafts.patch(id, {finished: false}); unpersistedDraft = false;
+      clearUndo(); problem = null; renderPage(); render(); page.focus();
+    } catch {problem = "Keep this page open: Journal cannot restore the earlier text safely."; render();}
+  }
+  function save(): void {
+    const owned = data, selectedType = type, queue = opens;
+    if (!owned || !selectedType || !queue || disposed || memoryOnly) return;
+    try {
+      for (const draft of drafts.list()) queue.request(draft.id, selectedType);
+    } catch {problem = "Keep this page open: Journal cannot read its drafts on this device.";}
     render();
   }
   function changed(): void {
     if (!entry || disposed) return;
     const selectedId = snapshot()?.selectedCollectionId ?? null;
+    const selectionChanged = selectedId !== observedCollectionId;
+    observedCollectionId = selectedId;
     const next = journalConnection(entry);
     if (next !== data?.connection) {
-      unlistenData?.(); unlistenData = null; data?.release(); data = null; types = []; type = null;
+      unlistenData?.(); unlistenData = null; opens?.dispose(); opens = null; data?.release(); data = null; types = []; type = null;
       if (next) {
         const owned = new JournalData(next, drafts); data = owned;
+        opens = new DraftOpens(owned, drafts, () => !disposed && data === owned && owned.connection.isCurrent(), render);
         unlistenData = owned.subscribe(render);
         void owned.types().then(value => {
           if (disposed || data !== owned) return;
-          types = value; type = value.length === 1 ? value[0]! : null;
+          types = value; type = value.find(item => item.name === preferences.entryTypes?.[owned.connection.id]) ?? (value.length === 1 ? value[0]! : null);
           render(); void save();
         }, error => {if (!disposed && data === owned) {problem = error instanceof Error ? error.message : "Journal could not read this collection's types."; render();}});
       }
     }
-    if (!memoryOnly && selectedId !== current.targetCollectionId) {
+    if (!memoryOnly && selectionChanged && selectedId !== current.targetCollectionId) {
       clearUndo();
       try {
-        if (!current.targetCollectionId && selectedId) current = drafts.patch(current.id, {targetCollectionId: selectedId});
-        else if (current.body.trim()) {
-          const next = drafts.create(selectedId);
-          drafts.patch(current.id, {finished: true}); current = next; renderPage();
-        } else current = drafts.patch(current.id, {targetCollectionId: selectedId});
+        if (!current.targetCollectionId && selectedId && !current.legacyKey) {
+          current = unpersistedDraft ? {...current, targetCollectionId: selectedId} : drafts.patch(current.id, {targetCollectionId: selectedId});
+        } else if (current.body.trim()) {
+          const next = drafts.blank(selectedId);
+          drafts.patch(current.id, {finished: true, touchedMs: Date.now()}); current = next; unpersistedDraft = true; renderPage();
+        } else current = unpersistedDraft ? {...current, targetCollectionId: selectedId} : drafts.patch(current.id, {targetCollectionId: selectedId});
       } catch {memoryOnly = true; problem = "Keep this page open: Journal cannot preserve its text before changing collections.";}
+    }
+    const usable = snapshot()?.selection.usable;
+    if (usable && preferences.collectionId !== usable.collectionId) {
+      preferences.collectionId = usable.collectionId;
+      try {drafts.savePreferences({...preferences, folder});} catch {problem = "Journal could not preserve your collection preference on this device.";}
     }
     render();
   }
@@ -187,7 +229,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
       const durable = drafts.get(current.id);
       if (!durable && !unpersistedDraft) throw new DraftPersistenceError();
       const original = durable ?? current;
-      current = drafts.put({...original, body, touchedMs: Date.now(), path: original.path ?? (body.trim() ? notePath(new Date(current.createdMs), folder) : null)});
+      current = drafts.put({...original, body, touchedMs: Date.now(), path: original.path ?? (body.trim() ? notePath(new Date(current.createdMs), folder, current.id) : null)});
       memoryOnly = false; unpersistedDraft = false; problem = null;
       if (data?.snapshot(current.id)) data.setBody(current.id, body);
       else void save();
@@ -212,7 +254,17 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     page.focus();
   });
   listen(choice, "change", () => {const id = choice.value; if (!application) return; void act(() => id ? application.select(id, {signal: caller.signal}) : application.chooseAnother({signal: caller.signal}));});
-  listen(typeChoice, "change", () => {type = types.find(item => item.name === typeChoice.value) ?? null; void save();});
+  listen(element("last-collection"), "click", () => {
+    if (application && preferences.collectionId) void act(() => application.select(preferences.collectionId!, {signal: caller.signal}));
+  });
+  listen(typeChoice, "change", () => {
+    type = types.find(item => item.name === typeChoice.value) ?? null;
+    if (data && type) {
+      preferences.entryTypes = Object.fromEntries(Object.entries({...preferences.entryTypes, [data.connection.id]: type.name}).slice(-64));
+      try {drafts.savePreferences({...preferences, folder});} catch {problem = "Journal could not preserve your entry type preference on this device.";}
+    }
+    save();
+  });
   const authorize = () => {
     if (!application) return;
     const state = snapshot(), usable = state?.selection.state === "usable";
@@ -243,7 +295,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
   if (application?.getSnapshot().status === "not_started") void act(() => application.start({signal: caller.signal}));
   return {currentDraft: () => current, newPage, undoNewPage, dispose() {
     if (disposed) return;
-    disposed = true; caller.abort(); clearUndo(); unlistenApp(); unlistenData?.(); data?.release();
+    disposed = true; caller.abort(); clearUndo(); unlistenApp(); unlistenData?.(); opens?.dispose(); data?.release();
     // No SDK replacement, physical close or borrowed-client shutdown on disposal.
   }};
 }

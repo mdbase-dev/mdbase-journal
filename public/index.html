@@ -38,6 +38,7 @@
     <div id="collection-row" class="row">
       <label for="collection-choice">Collection</label>
       <select id="collection-choice"></select>
+      <button id="last-collection" hidden>Open last used collection</button>
       <p>Switching starts a new page. Existing notes stay with their original collection.</p>
     </div>
     <div class="row">
@@ -59,6 +60,7 @@
     <div id="pending-row" class="row" hidden>
       <span class="label">On this device</span>
       <span id="pending-count"></span>
+      <div id="pending-details"></div>
     </div>
     <p>To read old notes, open the collection in Editor or any other app.</p>
     <div class="actions">
