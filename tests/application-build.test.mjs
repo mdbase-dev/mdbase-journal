@@ -23,7 +23,7 @@ test("consumer build retains original same-artifact Worker/native bytes and no p
     assert(Object.keys(result.sdk.inputs).every(path=>!path.includes("/testing/")));
     assert.deepEqual(Object.keys(result.application.inputs).sort(),["public/.well-known/mdbase-app.json","src/application.ts","src/drafts.ts","src/journal-data.ts","src/main.ts","src/view.ts"]);
     for(const member of ["application/worker.js","native/sqlite3.js","native/runtime-lab.wasm","native/sqlite3.wasm"]){
-      const archive=resolve(root,"vendor/mdbase-dev-sdk-d53d7d76.tgz");
+      const archive=resolve(root,"vendor/mdbase-dev-sdk-4de2cee7.tgz");
       const original=execFileSync("tar",["-xOf",archive,`package/dist/${member}`],{maxBuffer:16*1024*1024});
       assert.deepEqual(await readFile(resolve(output,"sdk",member)),original);
     }
@@ -33,8 +33,8 @@ test("consumer build retains original same-artifact Worker/native bytes and no p
     assert.equal(native.writingOnly,false);
     assert.equal(native.inputs.registeredApplicationId,"build-fixture-only");
     const provenance=JSON.parse(await readFile(resolve(output,"sdk/native/provenance.lab.json"),"utf8"));
-    assert.equal(provenance.runtime.source.commit,"515a7f8b17ebfb9d2d059eeda418fdc0953b5613");
-    assert.equal(provenance.runtime.sha256,"6c4ea51534b785c5165bfb671d40116535b1a60fafad035bd384708ea288de83");
+    assert.equal(provenance.runtime.source.commit,"6dab41b5a591da4c3b5298d2398029925be0a9b5");
+    assert.equal(provenance.runtime.sha256,"7c643b5530e58ce4ee0c04988179f4c489ed4cc094b342a43eb7ac4262d63730");
     assert.equal(provenance.verifier.clockOverride,false);
     const html=await readFile(resolve(root,"public/index.html"),"utf8");
     assert.match(html,/<script type="module" src="\.\/journal.js"><\/script>/);

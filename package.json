@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@mdbase-dev/connect-protocol": "file:vendor/mdbase-dev-connect-protocol-0.1.0-beta.129-d765e675c3da.tgz",
-    "@mdbase-dev/sdk": "file:vendor/mdbase-dev-sdk-d53d7d76.tgz"
+    "@mdbase-dev/sdk": "file:vendor/mdbase-dev-sdk-4de2cee7.tgz"
   },
   "devDependencies": {
     "@mdbase-dev/connect-dev": "0.1.0-beta.123",
