@@ -14,14 +14,20 @@ test("only SDK-validated HTTPS update links are offered, and stale links are rem
   const view = mountJournal(window.document, new JournalDrafts(memoryStorage()), f.fixture.entry);
   try {
     const link = window.document.getElementById("update-app") as HTMLAnchorElement;
-    for (const url of ["https://fixture.example/update", "http://fixture.example/update", "javascript:alert(1)"]) {
-      f.fixture.controls.publishSnapshot({...f.ready, status: "blocked", problem: "update_required", problemDetail: {
-        name: "AppCpAuthorityError", code: "collection_unavailable", server: {status: 409, code: "collection_unavailable", reason: "moved_to_next_runtime", retryAfterMs: null, updateUrl: url}}});
-      if (url.startsWith("https:")) {
-        assert.equal(link.hidden, false); assert.equal(link.href, url);
-        assert.equal(link.target, "_blank"); assert.equal(link.rel, "noopener noreferrer");
-      } else {assert.equal(link.hidden, true); assert.equal(link.hasAttribute("href"), false);}
+    for (const url of ["https://mdbase.dev/downloads", "https://fixture.example/update", "http://fixture.example/update", "javascript:alert(1)"]) {
+      const state = {...f.ready, status: "blocked" as const, problem: "update_required", problemDetail: {
+        name: "AppCpAuthorityError", code: "collection_unavailable", server: {status: 409, code: "collection_unavailable", reason: "moved_to_next_runtime", retryAfterMs: null, updateUrl: url}}};
+      f.fixture.controls.publishSnapshot(state);
+      const copy = describeError(state)!;
+      assert.equal(link.hidden, false); assert.equal(link.href, copy.updateUrl);
+      assert.equal(new URL(link.href).protocol, "https:");
+      assert.equal(new URL(link.href).hostname, "mdbase.dev");
+      if (url.startsWith("https://mdbase.dev/")) assert.equal(link.href, url);
+      else assert.notEqual(link.href, url, "untrusted URLs never bypass the SDK's safe downloads fallback");
+      assert.equal(link.target, "_blank"); assert.equal(link.rel, "noopener noreferrer");
     }
+    f.fixture.controls.publishSnapshot(f.ready);
+    assert.equal(link.hidden, true); assert.equal(link.hasAttribute("href"), false);
   } finally {view.dispose(); window.close(); f.close();}
 });
 for (const problem of ["collection_migrating", "update_required", "account_suspended"]) test(`live ${problem} uses SDK copy without fencing local writing`, async () => {
