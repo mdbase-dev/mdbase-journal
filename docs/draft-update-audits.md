@@ -64,6 +64,10 @@ checks original SDK Worker/native archive bytes and an exact application graph.
 There is no separate lint script. Six writing-only loopback browser checks
 passed on the earlier grid-fix tree; later SDK/migration changes have source
 checks, not fresh browser or native qualification. SDK error/status helpers
-use the exact DEV/LAB SDK41c intake. Public collection availability now propagates
-through that qualified SDK; per-item UI is a separate follow-up, not a consumer
-workaround.
+use the exact DEV/LAB SDK41c intake. Public collection availability propagates
+through that qualified SDK. Settings retain each unavailable name, disable its
+selection affordance and show the SDK's exact title, message and action label;
+only SDK-safe update links are clickable. Metadata cannot retire an original
+ready lease, erase local writing or Undo, or authorize a capture. Missing
+availability is not guessed. This is presentation over public SDK types, not a
+consumer cache, routing engine, parse workaround or native qualification.

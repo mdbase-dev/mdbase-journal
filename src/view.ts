@@ -114,14 +114,34 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     const collections = state?.collections ?? [];
     const option = (label: string, value: string) => {const item = document.createElement("option"); item.textContent = label; item.value = value; return item;};
     const requested = selection?.requested.collectionId ?? null;
-    choice.replaceChildren(option("Choose a collection…", ""), ...collections.map(item => option(item.collectionId === requested && description && state?.status !== "ready" ? `${item.displayName} — ${description.title}` : item.displayName, item.collectionId)),
-      ...(requested && !collections.some(item => item.collectionId === requested) ? [option("Requested collection (approval needed)", requested)] : []));
+    choice.replaceChildren(option("Choose a collection…", ""), ...collections.map(item => {
+      const guidance = describeError(item);
+      const label = guidance ? `${item.displayName} — ${guidance.title}` : item.collectionId === requested && description && state?.status !== "ready" ? `${item.displayName} — ${description.title}` : item.displayName;
+      const entry = option(label, item.collectionId); entry.disabled = item.availability?.state === "unavailable"; return entry;
+    }), ...(requested && !collections.some(item => item.collectionId === requested) ? [option("Requested collection (approval needed)", requested)] : []));
+    const availability = element("collection-availability");
+    availability.replaceChildren(...collections.flatMap(item => {
+      const guidance = describeError(item);
+      if (item.availability?.state !== "unavailable" || !guidance) return [];
+      const row = document.createElement("div"); row.className = "collection-guidance"; row.dataset.collectionId = item.collectionId;
+      const title = document.createElement("strong"), message = document.createElement("p");
+      title.textContent = `${item.displayName} — ${guidance.title}`; message.textContent = guidance.message; row.append(title, message);
+      if (guidance.actionLabel) {
+        if (guidance.updateUrl) {
+          const link = document.createElement("a"); link.textContent = guidance.actionLabel; link.href = guidance.updateUrl;
+          link.target = "_blank"; link.rel = "noopener noreferrer"; row.append(link);
+        } else {const next = document.createElement("small"); next.textContent = guidance.actionLabel; row.append(next);}
+      }
+      return [row];
+    }));
+    availability.hidden = !availability.childElementCount;
     choice.value = requested ?? "";
     choice.disabled = memoryOnly || busy || !application || state?.status === "closed";
     const previous = element<HTMLButtonElement>("last-collection");
     previous.hidden = !!requested || !preferences.collectionId || !application || state?.status === "closed";
-    previous.disabled = memoryOnly || busy;
-    const previousName = collections.find(item => item.collectionId === preferences.collectionId)?.displayName;
+    const previousCollection = collections.find(item => item.collectionId === preferences.collectionId);
+    previous.disabled = memoryOnly || busy || previousCollection?.availability?.state === "unavailable";
+    const previousName = previousCollection?.displayName;
     previous.textContent = previousName ? `Open ${previousName}` : "Open last used collection";
     typeChoice.replaceChildren(option("Choose a type…", ""), ...types.map(item => option(item.name, item.name)));
     typeChoice.value = type?.name ?? "";
@@ -269,9 +289,15 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     catch {problem = "Choose a folder within this collection that Journal can preserve on this device."; render();}
     page.focus();
   });
-  listen(choice, "change", () => {const id = choice.value; if (!application) return; void act(() => id ? application.select(id, {signal: caller.signal}) : application.chooseAnother({signal: caller.signal}));});
+  listen(choice, "change", () => {
+    const id = choice.value;
+    if (!application || choice.disabled) return;
+    if (snapshot()?.collections.find(item => item.collectionId === id)?.availability?.state === "unavailable") {render(); return;}
+    void act(() => id ? application.select(id, {signal: caller.signal}) : application.chooseAnother({signal: caller.signal}));
+  });
   listen(element("last-collection"), "click", () => {
-    if (application && preferences.collectionId) void act(() => application.select(preferences.collectionId!, {signal: caller.signal}));
+    if (!element<HTMLButtonElement>("last-collection").disabled && application && preferences.collectionId)
+      void act(() => application.select(preferences.collectionId!, {signal: caller.signal}));
   });
   listen(typeChoice, "change", () => {
     type = types.find(item => item.name === typeChoice.value) ?? null;
