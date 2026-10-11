@@ -11,7 +11,7 @@
     "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
-    "@mdbase-dev/sdk": "file:vendor/mdbase-dev-sdk-0.0.0-729b5391.tgz"
+    "@mdbase-dev/sdk": "file:vendor/mdbase-dev-sdk-0.0.0-b9965703.tgz"
   },
   "devDependencies": {
     "@mdbase-dev/connect-dev": "0.1.0-beta.123"

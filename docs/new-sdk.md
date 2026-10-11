@@ -7,7 +7,7 @@ is delivered and proven. Asset intake below is **not a complete native port**.
 
 ## Qualified browser consumption path
 
-The release-qualified `729b5391f9e8e8c192d93a7112324ce65078d106` SDK archive is
+The release-qualified `b9965703230091004f17e1632fbc91bdb9edb533` SDK archive is
 vendored and file-pinned in `package.json`/`package-lock.json`. Its SHA256/SHA512
 and browser member SHA256 are recorded in `vendor/mdbase-next-sdk.json`.
 `npm run build` verifies those bytes, then copies the existing classic-script
@@ -60,19 +60,25 @@ callback substitute is offered.
 
 ## Undelivered inputs
 
-The qualified SDK729b5391 archive includes actual SDK819 merge19bdeee1's shared
-native factory/client/journal/config ABI and SDK827 provider-receipt helpers.
-Release qualified all 275 members, 1650 SDK tests and five browser-bundle checks
+The qualified SDKb9965703 archive includes SDK837's host/caller lifetime
+composition fix and SDK832's optional bounded diagnostics, plus the earlier
+public factory/client/journal/config ABI and provider-receipt helpers. The
+original 750928-byte archive is copied unchanged; Journal's renderer consumes
+SDK snapshots directly without a new parser, raw-error logging or retry authority.
+Release qualified all 278 members, 1678 SDK tests and five browser-bundle checks
 (with three existing WASM-gated skips). This is delegated source/archive intake,
 not native factory/producer-ABI, browser or custody acceptance. Runtime/trust
 repinning and serving are not authorized; qualified per-app composition inputs
 remain required.
 
-Tnapp must deliver shared manifest-driven assess/apply/setup/original journal ABI
-and qualified `journal.entry@0.1.0` semantic tuple provenance. Final app identity,
-approved origins, runtime/trust/custody inputs and hosted/relay-only launch policy
-also remain undelivered. No Journal setup fork, private protocol or copied
-TaskNotes Worker/SQL/session engine can substitute. SDK807/5ba remains held.
+Apps owns authoring Journal's identity, approved build/origin inputs,
+manifest/catalog semantics, SQLite artifact configuration and original setup
+recovery using the public SDK factory/client/journal APIs. Its
+`journal.entry@0.1.0` compatibility must be proved against genuine current native
+schema/source evidence, not inferred from starter or file hashes. The prototype
+has no native entry yet; local native qualification precedes any enablement.
+No Journal auth/session/SQL engine, private protocol or copied TaskNotes bootstrap
+can substitute. SDK807/5ba remains held.
 
 ## Evidence
 
