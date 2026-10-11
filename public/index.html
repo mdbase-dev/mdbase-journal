@@ -18,7 +18,7 @@
 <body>
 <header>
   <div class="context"><span id="when"></span><span id="collection-name" hidden></span></div>
-  <button id="menu-button" aria-haspopup="dialog" aria-label="Journal settings">•••</button>
+  <button id="menu-button" aria-haspopup="dialog" aria-controls="menu" aria-label="Journal settings">•••</button>
 </header>
 <main>
   <textarea id="page" aria-label="Note" spellcheck="true" autocapitalize="sentences"></textarea>
@@ -31,9 +31,9 @@
     <button id="new-button" hidden><span class="keys" id="keys"></span> New page</button>
   </span>
 </footer>
-<dialog id="menu">
+<dialog id="menu" aria-labelledby="journal-settings-title" aria-describedby="menu-connection">
   <div class="sheet">
-    <h2>Journal</h2>
+    <h2 id="journal-settings-title">Journal</h2>
     <p id="menu-connection"></p>
     <div id="collection-row" class="row">
       <label for="collection-choice">Collection</label>

@@ -36,11 +36,56 @@ test("unregistered local writing opens a blank page and never needs an SDK", () 
   const h = dom(), storage = memoryStorage(), drafts = new JournalDrafts(storage);
   const a = mountJournal(h.window.document, drafts, null);
   h.write("A private page"); assert.equal(a.currentDraft().body, "A private page");
-  assert.match(h.window.document.getElementById("status")!.textContent!, /registered application/);
+  assert.match(h.window.document.getElementById("status")!.textContent!, /Sign-in is unavailable in this build/);
   const id = a.currentDraft().id; a.dispose();
   const b = mountJournal(h.window.document, drafts, null);
   assert.notEqual(b.currentDraft().id, id); assert.equal(h.page.value, ""); assert.equal(drafts.get(id)?.body, "A private page");
   b.dispose(); h.window.close();
+});
+test("first-input writing controls reappear when quiet mode ends and reset on a new page", () => {
+  const h = dom(), drafts = new JournalDrafts(memoryStorage()), view = mountJournal(h.window.document, drafts, null);
+  assert.equal(h.window.document.body.classList.contains("typing"), false);
+  h.write("First note"); const original = view.currentDraft();
+  assert.equal(h.window.document.body.classList.contains("typing"), true);
+  assert.equal(h.window.document.body.classList.contains("quiet"), true);
+  h.window.document.dispatchEvent(new h.window.Event("pointermove"));
+  assert.equal(h.window.document.body.classList.contains("quiet"), false);
+  assert.equal(h.window.document.getElementById("new-button")!.hidden, false);
+  assert.equal(h.window.document.getElementById("word-count")!.textContent, "2 words");
+  view.newPage();
+  assert.equal(h.window.document.body.classList.contains("typing"), false);
+  assert.equal(h.window.document.getElementById("new-button")!.hidden, true);
+  assert.equal(h.window.document.getElementById("undo-button")!.hidden, false);
+  assert.equal(drafts.get(original.id)?.body, "First note");
+  view.dispose(); h.window.close();
+});
+test("settings dialog has a visible accessible name and its trigger identifies it", () => {
+  const h = dom(), menu = h.window.document.getElementById("menu")!;
+  const title = h.window.document.getElementById(menu.getAttribute("aria-labelledby")!);
+  assert.equal(title?.textContent, "Journal");
+  assert.equal(h.window.document.getElementById("menu-button")!.getAttribute("aria-controls"), menu.id);
+  assert.equal(menu.getAttribute("aria-describedby"), "menu-connection");
+  h.window.close();
+});
+for (const trigger of ["menu-button", "status-button"]) test(`${trigger} initializes settings without resetting the writing folder`, () => {
+  const h = dom(), drafts = new JournalDrafts(memoryStorage());
+  drafts.savePreferences({folder: "writing", theme: "system"});
+  const menu = h.window.document.getElementById("menu") as HTMLDialogElement;
+  // Only native dialog presentation is simulated; no SDK/application exists.
+  menu.showModal = () => menu.setAttribute("open", "");
+  menu.close = () => {menu.removeAttribute("open"); menu.dispatchEvent(new h.window.Event("close"));};
+  const view = mountJournal(h.window.document, drafts, null);
+  h.write("Original note"); const original = view.currentDraft();
+  h.click(trigger);
+  assert.equal(menu.open, true);
+  assert.equal((h.window.document.getElementById("folder") as HTMLInputElement).value, "writing");
+  h.click("close-menu");
+  assert.equal(menu.open, false); assert.equal(h.window.document.activeElement, h.page);
+  assert.equal(drafts.preferences().folder, "writing");
+  assert.equal(view.currentDraft().id, original.id); assert.equal(view.currentDraft().body, "Original note");
+  view.newPage(); h.write("Next note"); assert(view.currentDraft().path?.startsWith("writing/"));
+  assert.equal(drafts.get(original.id)?.body, "Original note");
+  view.dispose(); h.window.close();
 });
 test("new page and Undo restore the same original draft identity and path", () => {
   const h = dom(), drafts = new JournalDrafts(memoryStorage()), view = mountJournal(h.window.document, drafts, null);

@@ -42,13 +42,13 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     page.value = current.body;
     page.style.height = "auto";
     page.style.height = `${Math.max(240, page.scrollHeight)}px`;
-    document.body.classList.toggle("typing", !!current.body.trim());
     document.body.classList.remove("quiet");
     element("when").textContent = new Date(current.createdMs).toLocaleString(undefined, {weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit"});
   }
   function render(): void {
     if (disposed) return;
     if (!memoryOnly) current = drafts.get(current.id) ?? current;
+    document.body.classList.toggle("typing", !!current.body.trim());
     const state = snapshot();
     const selected = state?.selection.usable ?? null;
     const selection = state?.selection;
@@ -61,7 +61,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
       message = record.state === "saved" && current.body === current.savedBody ? "Saved" : record.state === "saving" ? "Saving…" :
         ["conflict", "recovery", "deleted", "error"].includes(record.state) ? "Your text is on this device. Resolve its original save before continuing." : "On this device";
     }
-    if (!message) message = !entry ? "On this device. Journal needs its registered application before connecting." :
+    if (!message) message = !entry ? "On this device. Sign-in is unavailable in this build." :
       state?.problem === "application_not_yet_available" ? "On this device. Opening collections isn't available in this build yet." :
       selection?.state === "invalid" ? "The requested collection is invalid. Your text stays on this device." :
       selection?.state === "approval_required" ? "Approve the requested collection, or choose another. Your text stays on this device." :
@@ -105,7 +105,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     another.textContent = "Choose another collection";
     another.hidden = (!requested && selection?.state !== "invalid") || state?.status === "closed";
     another.disabled = busy;
-    element("menu-connection").textContent = selection?.state === "usable" && selected ? `Writing to ${name} when the SDK confirms this collection is ready.` : "Notes stay on this device until the requested collection is ready.";
+    element("menu-connection").textContent = selection?.state === "usable" && selected ? `Notes save to ${name} when this collection is ready.` : "Notes stay on this device until the requested collection is ready.";
     document.body.classList.toggle("undo", !!undoId);
     element("keys").textContent = /Mac|iPhone|iPad/.test(document.defaultView?.navigator.platform ?? "") ? "⌘↩" : "Ctrl+↩";
     const words = segmenter ? [...segmenter.segment(current.body)].filter(item => item.isWordLike).length : current.body.match(/\S+/g)?.length ?? 0;
@@ -202,7 +202,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
   listen(document, "keydown", event => {const key = event as KeyboardEvent; if ((key.ctrlKey || key.metaKey) && key.key === "Enter" && key.target === page && !document.querySelector("dialog[open]")) {key.preventDefault(); newPage();}});
   listen(element("new-button"), "click", newPage);
   listen(element("undo-button"), "click", undoNewPage);
-  listen(element("menu-button"), "click", () => {element<HTMLInputElement>("folder").value = folder; render(); menu.showModal();});
+  function openMenu(): void {element<HTMLInputElement>("folder").value = folder; render(); menu.showModal();}
+  listen(element("menu-button"), "click", openMenu);
   listen(element("close-menu"), "click", () => menu.close());
   listen(menu, "close", () => {
     const candidate = element<HTMLInputElement>("folder").value.trim() || "journal";
@@ -221,7 +222,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
   listen(element("connect-from-menu"), "click", authorize);
   listen(element("reconnect-from-menu"), "click", () => {if (application) void act(() => application.chooseAnother({signal: caller.signal}));});
   listen(element("disconnect"), "click", () => {if (application) void act(() => application.close());});
-  listen(element("status-button"), "click", () => {if (problem && data) void save(); else menu.showModal();});
+  listen(element("status-button"), "click", () => {if (problem && data) void save(); else openMenu();});
   const foreground = () => {if (application && !disposed) {try {application.setForeground(document.visibilityState === "visible");} catch {/* unavailable owner stays unavailable */}}};
   listen(document, "visibilitychange", foreground);
   function applyTheme(): void {
