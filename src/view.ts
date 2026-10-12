@@ -36,6 +36,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   let undoTimer: ReturnType<typeof setTimeout> | null = null;
   let memoryOnly = false;
   let unpersistedDraft = true;
+  const retrying = new Set<string>();
   const preferences = drafts.preferences();
   let folder = preferences.folder;
   const segmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, {granularity: "word"}) : null;
@@ -51,6 +52,21 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     mountCollectionUi(switcherHost, {part: "switcher", variant: "compact", mdbase, app}),
   ] : [];
   if (!mdbase) element("collection-row").hidden = true;
+  /** Only a genuine recovery (an original write whose outcome is unknown) offers
+   * Retry; writes kept on this device settle on their own. */
+  const recovering = (id: string): boolean => !memoryOnly && data?.snapshot(id)?.state === "recovery" && !data.problem(id);
+  function retry(id: string): void {
+    const owned = data;
+    if (!owned || disposed || retrying.has(id) || !recovering(id)) return;
+    retrying.add(id); render();
+    // Settles the original write through its session; nothing is created again.
+    void owned.flush(id).catch(() => {/* The session keeps its recovery state and problem. */})
+      .finally(() => {retrying.delete(id); render();});
+  }
+  function retryButton(button: HTMLButtonElement, id: string): void {
+    button.textContent = retrying.has(id) ? "Retrying…" : "Retry saving";
+    button.disabled = retrying.has(id);
+  }
   function clearUndo(): void {undoId = null; if (undoTimer !== null) clearTimeout(undoTimer); undoTimer = null;}
   function renderPage(): void {
     page.value = current.body;
@@ -109,6 +125,10 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
         saving?.state === "opening" || record?.state === "saving" ? "Saving…" :
         record && ["conflict", "recovery", "deleted", "error"].includes(record.state) ? "Original save needs attention" : "On this device";
       text.textContent = `${new Date(draft.createdMs).toLocaleString()} — ${state}`; row.append(text);
+      if (draft.id !== current.id && recovering(draft.id)) {
+        const again = document.createElement("button"); again.type = "button"; retryButton(again, draft.id);
+        again.onclick = () => retry(draft.id); row.append(again);
+      }
       if (draft.id !== current.id) {
         const resume = document.createElement("button"); resume.type = "button"; resume.textContent = "Resume writing";
         resume.disabled = memoryOnly; resume.onclick = () => restoreDraft(draft.id); row.append(resume);
@@ -123,6 +143,9 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     element("type-row").hidden = types.length < 2;
     element("new-button").hidden = !current.body.trim();
     element("undo-button").hidden = !undoId;
+    const retryCurrent = recovering(current.id), retryElement = element<HTMLButtonElement>("retry-button");
+    retryElement.hidden = !retryCurrent; retryButton(retryElement, current.id);
+    document.body.classList.toggle("retry", retryCurrent);
     element("menu-connection").textContent = openId ? `Notes save to ${name}.` : "Notes stay on this device until a collection is open.";
     document.body.classList.toggle("undo", !!undoId);
     element("keys").textContent = /Mac|iPhone|iPad/.test(document.defaultView?.navigator.platform ?? "") ? "⌘↩" : "Ctrl+↩";
@@ -224,6 +247,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   listen(document, "keydown", event => {const key = event as KeyboardEvent; if ((key.ctrlKey || key.metaKey) && key.key === "Enter" && key.target === page && !document.querySelector("dialog[open]")) {key.preventDefault(); newPage();}});
   listen(element("new-button"), "click", newPage);
   listen(element("undo-button"), "click", undoNewPage);
+  listen(element("retry-button"), "click", () => retry(current.id));
   function openMenu(): void {element<HTMLInputElement>("folder").value = folder; render(); menu.showModal();}
   listen(element("menu-button"), "click", openMenu);
   listen(element("close-menu"), "click", () => menu.close());

@@ -27,8 +27,8 @@ textarea { display:block; width:100%; max-width:680px; min-height:100vh; min-hei
 .status,.hint { background:var(--bg); }
 .status.quiet { opacity:0; pointer-events:none; } .status.quiet:focus-visible { opacity:1; }
 .hint { opacity:0; transition:opacity .6s ease; white-space:nowrap; border-radius:6px; }
-body.typing:not(.quiet) .hint,body.undo .hint,.hint:focus-within { opacity:1; }
-.hint button { min-height:44px; } .count { margin-right:16px; font-variant-numeric:tabular-nums; }
+body.typing:not(.quiet) .hint,body.undo .hint,body.retry .hint,.hint:focus-within { opacity:1; }
+.hint button { min-height:44px; } #retry-button { margin:-6px 8px -6px -8px; color:var(--accent); } .count { margin-right:16px; font-variant-numeric:tabular-nums; }
 @media (max-width:520px) { .hint .keys { display:none; } }
 #menu { border:1px solid var(--faint); background:var(--panel); color:var(--ink); border-radius:12px; padding:0; width:min(420px,calc(100vw - 32px)); box-shadow:0 20px 60px rgb(0 0 0 / .18); }
 #menu::backdrop { background:rgb(0 0 0 / .25); }
