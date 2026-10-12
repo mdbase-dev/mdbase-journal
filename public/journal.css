@@ -52,10 +52,9 @@ body.typing:not(.quiet) .hint,body.undo .hint,.hint:focus-within { opacity:1; }
 #returning-user-notice a:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 body:has(#returning-user-notice) textarea { padding-top:3rem; }
 /* Shared mdbase collection UI (settings panel and header switcher) in Journal's palette. */
-:root { --mdbase-collections-accent:var(--accent); --mdbase-collections-on-accent:var(--panel); --mdbase-collections-surface:var(--panel); --mdbase-collections-canvas:var(--bg); --mdbase-collections-text:var(--ink); --mdbase-collections-text-soft:var(--muted); --mdbase-collections-border:var(--faint); --mdbase-collections-danger:var(--warn); --mdbase-collections-radius:8px; --mdbase-collections-font:Inter,system-ui,sans-serif; --mdbase-collections-control-height:44px; }
-.mdbase-collections { --font-size-ui:.875rem; --font-size-caption:.75rem; --font-size-section:.9375rem; --font-size-heading:1.125rem; --font-weight-semibold:500; --radius-sm:6px; --radius-md:8px; --radius-lg:12px; --elevation-low:0 4px 14px rgb(0 0 0 / .08); --elevation-high:0 20px 60px rgb(0 0 0 / .18); --motion-spin:700ms; }
+:root { --mdbase-collections-accent:var(--accent); --mdbase-collections-on-accent:var(--panel); --mdbase-collections-surface:var(--panel); --mdbase-collections-canvas:var(--bg); --mdbase-collections-text:var(--ink); --mdbase-collections-text-soft:var(--muted); --mdbase-collections-border:var(--faint); --mdbase-collections-danger:var(--warn); --mdbase-collections-radius:8px; --mdbase-collections-font:Inter,system-ui,sans-serif; --mdbase-collections-control-height:44px; --mdbase-collections-font-size:.875rem; --mdbase-collections-font-size-heading:1.125rem; --mdbase-collections-font-weight-strong:500; --mdbase-collections-radius-sm:6px; --mdbase-collections-elevation-high:0 20px 60px rgb(0 0 0 / .18); }
 #collection-switcher { --mdbase-collections-control-height:32px; min-width:0; }
 #collection-switcher .mdbase-collections-trigger { max-width:220px; padding:0 6px; color:var(--muted); font-size:.8125rem; }
 #collection-switcher .mdbase-collections-trigger-name { font-weight:400; }
 [hidden] { display:none !important; }
-@media (prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none !important; } .mdbase-collections { --motion-spin:0ms; } }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none !important; } }

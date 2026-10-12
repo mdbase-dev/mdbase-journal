@@ -255,9 +255,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   for (const name of ["pointermove", "wheel", "touchmove", "focusin"]) listen(document, name, () => document.body.classList.remove("quiet"));
   applyTheme();
   const unlistenApp = mdbase?.subscribe(changed) ?? (() => {});
+  // The shared panel starts the SDK; failures are on the snapshot, shown with their fix.
   renderPage(); changed(); render();
-  // Failures are on the snapshot; the shared panel shows them with their fix.
-  if (mdbase?.getSnapshot().phase.kind === "starting") void mdbase.start({signal: caller.signal}).catch(() => undefined);
   return {currentDraft: () => current, newPage, undoNewPage, dispose() {
     if (disposed) return;
     disposed = true; caller.abort(); clearUndo(); unlistenApp(); unlistenData?.(); unlistenStatus?.(); opens?.dispose(); data?.release();
