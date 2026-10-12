@@ -4,9 +4,11 @@ Coordinator co0578 / co0636: rows 12, 16, 17 and 20.
 
 - Each draft independently acquires its original SDK record lease. One rejected
   acquisition or indefinitely pending confirmation does not block later notes.
-  Failed acquisition backs off from one second to one minute. Once a create
-  intent exists, recovery only reads its original receipt/record; it never
-  resubmits creation, chooses a sibling path or replaces SDK autosave.
+  A failed acquisition is requested again by the next edit or sync status
+  change, not by a timer. Unconfirmed writes are settled by the SDK write
+  ledger. Once a create intent exists, a later visit only reads its original
+  record; it never resubmits creation, chooses a sibling path or replaces SDK
+  autosave.
 - Settings show each pending entry's state and offer local writing restoration.
   Readiness notifications for the same selection cannot clear restored text.
   An actual SDK selection change still preserves and pins the old note.
@@ -25,7 +27,7 @@ Coordinator co0578 / co0636: rows 12, 16, 17 and 20.
   existing paths and uncertain intents never change.
 - Journal-owned storage is bounded to 3 MiB (UTF-16 key/value accounting) and 256
   native draft entries. Only finished, confirmed copies older than six hours can
-  be evicted. Unsaved, recovery, imported and live-lease-pinned copies remain;
+  be evicted. Unsaved, unconfirmed, imported and live-lease-pinned copies remain;
   exceeding the bound refuses persistence and keeps current RAM text visible
   with the existing keep-page-open warning. Other applications' storage is not
   pruned. New visits proactively reclaim eligible old confirmed copies even

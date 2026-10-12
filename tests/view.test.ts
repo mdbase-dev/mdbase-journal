@@ -181,7 +181,8 @@ test("an open collection stays usable through re-checks; a retired client never 
     assert.equal(journalConnection(f.mdbase)?.records, f.records);
     f.fixture.controls.publishSnapshot({...f.ready, readiness: {...f.ready.readiness, checking: true}});
     assert.equal(journalConnection(f.mdbase)?.records, f.records, "a re-check keeps the open lease");
-    f.fixture.controls.publishSnapshot(f.ready); f.retire(); assert.equal(journalConnection(f.mdbase), null);
+    f.retire(); const state = f.mdbase.getSnapshot();
+    assert.equal(journalConnection({getSnapshot: () => ({...state, phase: {...state.phase, connection: f.connection}} as typeof state)}), null);
   } finally {f.close();}
 });
 test("application selection changes keep old text pinned and start a new page", async () => {

@@ -35,7 +35,7 @@ test("real SDK create pins original IDs, then edits through the same record leas
   } finally {data.release(); assert.equal(h.records.link, "open"); h.close();}
 });
 test("pending original create is not reported saved and newer typing survives completion", async () => {
-  const h = await applicationFixture(null), drafts = new JournalDrafts(memoryStorage()), draft = drafts.create(h.connection.id);
+  const h = await applicationFixture({confirmed: false}), drafts = new JournalDrafts(memoryStorage()), draft = drafts.create(h.connection.id);
   drafts.patch(draft.id, {path: "pending.md", body: "Original"});
   const data = new JournalData(h.connection, drafts), captured = deferred<void>(), original = h.records.create.bind(h.records);
   const spy = mock.method(h.records, "create", async (...args: Parameters<typeof original>) => {const value = await original(...args); captured.resolve(); return value;});

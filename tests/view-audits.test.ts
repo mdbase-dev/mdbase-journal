@@ -81,7 +81,7 @@ test("an older uncertain entry does not replace the new page's truthful Saved st
     view.newPage(); h.write("Later"); await saved.promise; await turn();
     assert.equal(drafts.get(first.id)!.savedBody, null); assert.equal(drafts.get(view.currentDraft().id)!.savedBody, "Later");
     assert.equal(h.window.document.getElementById("status")!.textContent, "Saved");
-    assert.match(h.window.document.getElementById("pending-details")!.textContent!, /Original save unresolved; checking again/);
+    assert.match(h.window.document.getElementById("pending-details")!.textContent!, /Original save unresolved/);
     assert.equal(create.mock.callCount(), 2); assert.notEqual(first.path, view.currentDraft().path);
   } finally {observer.disconnect(); view.dispose(); describe.mock.restore(); create.mock.restore(); h.window.close(); f.close();}
 });

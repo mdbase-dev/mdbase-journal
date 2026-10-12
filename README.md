@@ -32,14 +32,14 @@ The build writes `JOURNAL_ORIGIN` into the manifest as its homepage (and icon an
 
 The current SDK41c dev packet contains its original runtime/SQLite WASM and canonical LAB trust (`native.available=true` describes packaged asset availability, not registration/readiness). LAB native consumer builds now succeed with explicit build inputs; without them they still refuse. Production trust remains unavailable. Journal never supplies substitute assets or trust. Registration and any LAB refresh/deployment remain separately owned.
 
-Tests use the public SDK application fixture with actual SDK clients over `MemoryReplica` for records and files. Controlled readiness/catalog metadata is test-only, not native/runtime acceptance. Type checking retains `exactOptionalPropertyTypes=true` and `skipLibCheck=false`.
+Tests use the SDK's `createTestMdbase` front door with actual SDK clients over `MemoryReplica` for records and files. Controlled readiness/catalog metadata is test-only, not native/runtime acceptance. Type checking retains `exactOptionalPropertyTypes=true` and `skipLibCheck=false`.
 
 ## Saving and recovery
 
 - Local drafts are persisted before any native capture. Failed persistence keeps text visible and refuses a remote write.
 - Draft destinations remain pinned across collection changes. Switching starts a blank page; the original note stays with its original collection.
-- Creation retains the original record UUID, mutation UUID and exact intent before capture. Unknown outcomes query the same receipt and record; Journal never retries creation at a sibling path.
-- Edits use the shared SDK record lease, autosave, flush and recovery. A transport reply or optimistic record is not enough to display Saved.
+- Creation retains the original record UUID, mutation UUID and exact intent before capture, then settles it with the SDK's `save()`. A write the log has not confirmed yet is kept on this device and the SDK write ledger settles it, also after a reload; Journal opens the record and keeps writing. A later visit reads the original record by its UUID. Only a refusal starts a new intent; Journal never retries creation at a sibling path.
+- Edits use the shared SDK record lease, autosave and flush. Only a confirmed record displays Saved.
 - Conflicts, holds, deletion or changed remote text preserve local writing instead of recreating or overwriting another record. Closing a writing view releases only its borrowed leases, never the shared client.
 - Earlier prototype `journal.note.*` drafts remain byte-for-byte on the device and are counted in settings. They lack original native mutation identities, so the port does not silently migrate or replay them.
 

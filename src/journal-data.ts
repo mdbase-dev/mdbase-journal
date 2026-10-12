@@ -21,8 +21,10 @@ export function journalEntryTypes(catalog: wire.DescribeResult): JournalEntryTyp
   if (!types.length) throw new Error("This collection has no Journal entry type.");
   return types;
 }
+/** A readable original record: confirmed, or kept on this device while the SDK
+ * write ledger settles it. Never a protected or inconsistent readback. */
 function currentRecord(record: wire.RecordView, id: string): void {
-  if (record.id !== id || record.state.state !== "confirmed" || record.state.hold !== undefined || (record.state.unresolved ?? 0) !== 0 ||
+  if (record.id !== id || (record.state.state !== "confirmed" && record.state.state !== "pending") || record.state.hold !== undefined || (record.state.unresolved ?? 0) !== 0 ||
       typeof record.body !== "string" || typeof record.document !== "string" || revisionOf(record.document) !== record.revision) {
     throw new Error("Keep this note on this device until its original record can be read safely.");
   }
@@ -88,24 +90,26 @@ export class JournalData {
           typeName: type.name, createdField: type.createdField, path, created: draft.created,
           account: this.connection.scope.account, installation: this.connection.scope.installation}});
         const attempt = draft.createAttempt!;
-        const write = await this.connection.records.create({id: attempt.recordId, path: attempt.path, type: attempt.typeName,
-          frontmatter: {[attempt.createdField]: attempt.created}, body: attempt.body}, {mutationId: attempt.mutationId, signal: this.caller.signal});
+        const result = await this.connection.records.save(this.connection.records.create({id: attempt.recordId, path: attempt.path, type: attempt.typeName,
+          frontmatter: {[attempt.createdField]: attempt.created}, body: attempt.body}, {mutationId: attempt.mutationId, signal: this.caller.signal}), {signal: this.caller.signal});
         this.ensure(draft);
-        await write.confirmed;
-        this.ensure(draft);
+        // A refusal is definite: nothing was created, so the next save starts a new intent.
+        if (result.outcome === "rejected") {
+          this.drafts.patch(id, {createAttempt: null});
+          throw new Error(result.problem?.message ?? "mdbase refused this note. Your text is still on this device.");
+        }
       }
-      // Recovery queries the ORIGINAL receipt only, never resubmits creation.
+      // Confirmed or kept on this device: the SDK write ledger settles it. Read the
+      // ORIGINAL record by its pinned ID; creation is never resubmitted.
       const attempt = draft.createAttempt!;
-      const receipt = await this.connection.records.receipt(attempt.mutationId, this.caller.signal);
-      this.ensure(draft);
-      if (receipt.mutation !== attempt.mutationId || receipt.state !== "confirmed" || (receipt.records !== undefined && !receipt.records.some(record => record.id === attempt.recordId))) throw new Error("Keep this page open while its original save is unresolved.");
-      const record = await this.connection.records.get(attempt.recordId, {body: true, document: true, effective: true}, this.caller.signal);
+      const record = await this.connection.records.get(attempt.recordId, {body: true, document: true, effective: true}, this.caller.signal)
+        .catch(() => {throw new Error("Keep this page open while its original save is unresolved.");});
       this.ensure(draft); currentRecord(record, attempt.recordId);
       if (record.body !== attempt.body) throw new Error("The original saved note has changed. Your local text has been preserved.");
-      draft = this.drafts.patch(id, {recordId: attempt.recordId, savedBody: attempt.body});
+      draft = this.drafts.patch(id, {recordId: attempt.recordId, savedBody: record.state.state === "confirmed" ? attempt.body : null});
     }
-    const lease = await this.connection.records.records.open(draft.recordId!, {signal: this.caller.signal,
-      autosave: {idleMs: 1200}, ...(draft.recovery ? {recovery: draft.recovery} : {})});
+    // An unconfirmed write from an earlier visit is in the SDK write ledger; the record stays editable.
+    const lease = await this.connection.records.records.open(draft.recordId!, {signal: this.caller.signal, autosave: {idleMs: 1200}});
     try {
       this.ensure(draft);
       const snapshot = lease.session.getSnapshot();
@@ -114,12 +118,7 @@ export class JournalData {
         if (this.disposed || !this.connection.isCurrent() || this.problems.has(id)) return;
         try {
           const value = lease.session.getSnapshot();
-          // Recovery is the shared session's original capture, not an app MID.
-          if (value.recovery) {
-            if (value.recovery.recordId !== draft.recordId) throw new Error("The original record recovery identity changed.");
-            this.drafts.patch(id, {recovery: {mutationId: value.recovery.mutationId, recordId: value.recovery.recordId, baseRevision: value.recovery.baseRevision}});
-          }
-          if (value.state === "saved" && !value.dirty && value.lastReceipt?.state === "confirmed") this.drafts.patch(id, {savedBody: value.body, recovery: null});
+          if (value.state === "saved" && !value.dirty) this.drafts.patch(id, {savedBody: value.body});
         } catch {this.problems.set(id, "Keep this page open: Journal cannot preserve the original save outcome on this device.");}
         this.notify();
       });
@@ -128,7 +127,7 @@ export class JournalData {
       const latest = this.drafts.get(id);
       if (!latest) throw new Error("The original local draft is missing. Keep this page open.");
       this.ensure(latest);
-      if (snapshot.state === "saved" || snapshot.state === "unsaved") lease.session.setBody(latest.body);
+      if (snapshot.state === "saved" || snapshot.state === "saved_on_device" || snapshot.state === "unsaved") lease.session.setBody(latest.body);
       if (this.problems.has(id)) throw new Error(this.problems.get(id));
       return lease;
     } catch (error) {

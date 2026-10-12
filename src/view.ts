@@ -73,7 +73,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     let message = problem ?? data?.problem(current.id);
     const opening = opens?.state(current.id);
     if (!message && current.legacyKey) message = "Earlier note: review its original save. Your text stays on this device.";
-    if (!message && opening?.state === "retrying") message = "The original save is unresolved. Your text stays on this device; checking again.";
+    if (!message && opening?.state === "unresolved") message = "The original save is unresolved. Your text stays on this device.";
     if (!message && record && ["conflict", "recovery", "deleted", "error"].includes(record.state)) message = "Your text is on this device. Resolve its original save before continuing.";
     if (!message && actionProblem) message = actionProblem.title;
     if (!message && phase?.kind === "ready" && (phase.problem || state?.problem)) message = state?.sync?.text ?? phase.problem?.title ?? describeError(state)?.title;
@@ -105,7 +105,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       const text = document.createElement("small"), saving = opens?.state(draft.id), record = data?.snapshot(draft.id);
       const state = draft.legacyKey ? "Earlier note: original save needs review" :
         draft.targetCollectionId && draft.targetCollectionId !== openId ? "Waiting for its collection" :
-        data?.problem(draft.id) ? "Original save needs attention" : saving?.state === "retrying" ? "Original save unresolved; checking again" :
+        data?.problem(draft.id) ? "Original save needs attention" : saving?.state === "unresolved" ? "Original save unresolved" :
         saving?.state === "opening" || record?.state === "saving" ? "Saving…" :
         record && ["conflict", "recovery", "deleted", "error"].includes(record.state) ? "Original save needs attention" : "On this device";
       text.textContent = `${new Date(draft.createdMs).toLocaleString()} — ${state}`; row.append(text);
@@ -162,7 +162,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   }
   function save(): void {
     const owned = data, selectedType = type, queue = opens;
-    if (!owned || !selectedType || !queue || disposed || memoryOnly) return;
+    if (!owned || !selectedType || !queue || disposed || memoryOnly) {render(); return;}
     try {
       for (const draft of drafts.list()) queue.request(draft.id, selectedType);
     } catch {problem = "Keep this page open: Journal cannot read its drafts on this device.";}
@@ -180,7 +180,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
         const owned = new JournalData(next, drafts); data = owned;
         opens = new DraftOpens(owned, drafts, () => !disposed && data === owned && owned.connection.isCurrent(), render);
         unlistenData = owned.subscribe(render);
-        unlistenStatus = next.records.onStatus(render);
+        // A status push (back online, pending writes settled) is when a failed open can succeed.
+        unlistenStatus = next.records.onStatus(save);
         void owned.types().then(value => {
           if (disposed || data !== owned) return;
           types = value; type = value.find(item => item.name === preferences.entryTypes?.[owned.connection.id]) ?? (value.length === 1 ? value[0]! : null);

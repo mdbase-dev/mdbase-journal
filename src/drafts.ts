@@ -19,7 +19,6 @@ export interface JournalDraft {
   recordId: string | null;
   savedBody: string | null;
   createAttempt: CreateAttempt | null;
-  recovery: {mutationId: string; recordId: string; baseRevision: string | null} | null;
   finished: boolean;
   touchedMs: number;
   /** Prototype text has no original native capture identity. Import is local only. */
@@ -34,14 +33,12 @@ function validDraft(value: unknown): value is JournalDraft {
   if (!object(value) || !uuid(value.id) || typeof value.created !== "string" || !Number.isFinite(Date.parse(value.created)) || !Number.isFinite(value.createdMs) ||
       typeof value.body !== "string" || value.body.length > 4 * 1024 * 1024 || !textOrNull(value.path) || !textOrNull(value.targetCollectionId) ||
       !textOrNull(value.recordId) || !textOrNull(value.savedBody) || typeof value.finished !== "boolean" || !Number.isFinite(value.touchedMs)) return false;
-  if (value.legacyKey !== undefined && (typeof value.legacyKey !== "string" || !value.legacyKey.startsWith("journal.note.") || value.legacyKey.length > 1024 || value.createAttempt !== null || value.recordId !== null || value.recovery !== null)) return false;
+  if (value.legacyKey !== undefined && (typeof value.legacyKey !== "string" || !value.legacyKey.startsWith("journal.note.") || value.legacyKey.length > 1024 || value.createAttempt !== null || value.recordId !== null)) return false;
   const attempt = value.createAttempt;
   if (attempt !== null && (!object(attempt) || ["body", "typeName", "createdField", "path", "created", "account", "installation"].some(key => typeof attempt[key] !== "string") ||
       !uuid(attempt.mutationId) || !uuid(attempt.recordId) || attempt.created !== value.created || attempt.path !== value.path || !value.targetCollectionId)) return false;
   if (value.recordId !== null && (!object(attempt) || value.recordId !== attempt.recordId)) return false;
-  if (value.savedBody !== null && value.recordId === null) return false;
-  const recovery = value.recovery;
-  return recovery === null || (object(recovery) && uuid(recovery.mutationId) && recovery.recordId === value.recordId && value.recordId !== null && textOrNull(recovery.baseRevision));
+  return value.savedBody === null || value.recordId !== null;
 }
 export class DraftPersistenceError extends Error {
   constructor() {super("Keep this page open: Journal cannot preserve its text on this device.");}
@@ -102,7 +99,7 @@ export class JournalDrafts {
     return draft;
   }
   private canPrune(draft: JournalDraft, now: number): boolean {
-    return !this.pins.has(draft.id) && draft.finished && !!draft.recordId && !draft.recovery && !draft.legacyKey &&
+    return !this.pins.has(draft.id) && draft.finished && !!draft.recordId && !draft.legacyKey &&
       draft.body === draft.savedBody && draft.touchedMs <= now - 6 * 60 * 60 * 1000;
   }
   /** Reclaim old confirmed copies on a new visit, before hitting a quota.
@@ -118,7 +115,7 @@ export class JournalDrafts {
     }
     return removed;
   }
-  /** Evict only old, finished, confirmed native copies, never writing/recovery
+  /** Evict only old, finished, confirmed native copies, never unsaved
    * text, imported text, pinned SDK leases, or another application's storage. */
   private bound(key: string, bytes: string): void {
     const entries = new Map<string, string>();
@@ -160,7 +157,7 @@ export class JournalDrafts {
   }
   blank(collectionId: string | null, now = new Date()): JournalDraft {
     return {id: crypto.randomUUID(), created: localIso(now), createdMs: now.getTime(), body: "", path: null,
-      targetCollectionId: collectionId, recordId: null, savedBody: null, createAttempt: null, recovery: null,
+      targetCollectionId: collectionId, recordId: null, savedBody: null, createAttempt: null,
       finished: false, touchedMs: now.getTime()};
   }
   create(collectionId: string | null, now = new Date()): JournalDraft {

@@ -69,7 +69,7 @@ test("partial-quota legacy import keeps its first copy stable across repeated re
   assert.equal(drafts.list().length, 2); assert.equal(drafts.get(original.id)?.body, original.body);
   assert.equal(drafts.get(original.id)?.targetCollectionId, "first-destination"); assert.equal(drafts.legacyPendingCount(), 0);
   assert.equal(storage.getItem("journal.note.first"), first); assert.equal(storage.getItem("journal.note.second"), second);
-  for (const copy of drafts.list()) {assert.equal(copy.createAttempt, null); assert.equal(copy.recordId, null); assert.equal(copy.recovery, null);}
+  for (const copy of drafts.list()) {assert.equal(copy.createAttempt, null); assert.equal(copy.recordId, null);}
 });
 test("retention evicts only an old finished confirmed copy, never unsaved writing", () => {
   const storage = memoryStorage(), drafts = new JournalDrafts(storage, {maxBytes: 100_000, maxDrafts: 2});
@@ -85,12 +85,11 @@ test("new-visit pruning reclaims old confirmed copies below the cap, once only",
   assert.equal(drafts.get(saved.id), null); assert.equal(drafts.get(waiting.id)?.body, waiting.body);
   assert.equal(storage.getItem("another-app"), "untouched");
 });
-test("proactive pruning protects recent, unfinished, recovery and live-pinned copies", () => {
-  for (const kind of ["recent", "unfinished", "recovery", "pinned"] as const) {
+test("proactive pruning protects recent, unfinished and live-pinned copies", () => {
+  for (const kind of ["recent", "unfinished", "pinned"] as const) {
     const drafts = new JournalDrafts(memoryStorage()), saved = confirmed(drafts);
     if (kind === "recent") drafts.patch(saved.id, {touchedMs: Date.now()});
     if (kind === "unfinished") drafts.patch(saved.id, {finished: false});
-    if (kind === "recovery") drafts.patch(saved.id, {recovery: {mutationId: crypto.randomUUID(), recordId: saved.recordId!, baseRevision: null}});
     if (kind === "pinned") drafts.pin(saved.id);
     assert.equal(drafts.pruneConfirmed(), 0); assert(drafts.get(saved.id));
   }
@@ -112,10 +111,9 @@ test("pinned borrowed sessions cannot be evicted; each pin releases once", () =>
   assert.throws(() => drafts.put(next), DraftPersistenceError); second(); drafts.put(next);
   assert.equal(drafts.get(saved.id), null);
 });
-test("a recovery identity, unfinished copy or unsaved text is never pruned to make room", () => {
-  for (const kind of ["recovery", "unfinished", "unsaved"] as const) {
+test("an unfinished copy or unsaved text is never pruned to make room", () => {
+  for (const kind of ["unfinished", "unsaved"] as const) {
     const drafts = new JournalDrafts(memoryStorage(), {maxBytes: 100_000, maxDrafts: 1}), saved = confirmed(drafts);
-    if (kind === "recovery") drafts.patch(saved.id, {recovery: {mutationId: crypto.randomUUID(), recordId: saved.recordId!, baseRevision: null}});
     if (kind === "unfinished") drafts.patch(saved.id, {finished: false});
     if (kind === "unsaved") drafts.patch(saved.id, {body: "New local writing"});
     assert.throws(() => drafts.put({...drafts.blank(null), body: "Next"}), DraftPersistenceError);
