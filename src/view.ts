@@ -162,7 +162,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     connect.disabled = (busy && !signInAction) || !application || state?.problem === "application_not_yet_available";
     element<HTMLButtonElement>("disconnect").textContent = "Sign out";
     element<HTMLButtonElement>("disconnect").disabled = busy;
-    element("disconnect").hidden = !state?.signIn || state.status === "closed";
+    // Sign out only once signed in: a signed-out session still has a sign-in flow.
+    element("disconnect").hidden = !state?.signIn || !["unselected", "opening", "setup_required", "ready", "blocked"].includes(state.status);
     const another = element<HTMLButtonElement>("reconnect-from-menu");
     another.textContent = "Choose another collection";
     another.hidden = (!requested && selection?.state !== "invalid") || state?.status === "closed";

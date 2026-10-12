@@ -248,6 +248,16 @@ test("choose another delegates SDK selection while the original draft stays pinn
   assert.equal(drafts.get(original.id)?.body, "Retained"); assert.equal(drafts.get(original.id)?.targetCollectionId, f.connection.id);
   view.dispose(); h.window.close(); f.close();
 });
+test("signed out with a pending sign-in flow offers Sign in, never Sign out", async () => {
+  // UX-005: settings showed an enabled Sign out next to Sign in before sign-in.
+  const f = await applicationFixture(), h = dom();
+  f.fixture.controls.publishSnapshot({...f.ready, status: "signed_out", selectedCollectionId: null, collections: [], selection: {...f.ready.selection, state: "none", usable: null, requested: {collectionId: null, source: "none", approved: false, displayName: null}}, signIn: {requestId: "fixture-request", installationId: "fixture-installation", deviceId: "fixture-device", appId: "journal.fixture", kind: "app-runtime", verificationUri: "https://fixture.example/verify", state: "pending", accountId: null, collectionIds: [], createCollections: false, requestedCreateCollections: false}});
+  const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.fixture.entry);
+  assert.equal(h.window.document.getElementById("disconnect")!.hidden, true);
+  assert.equal(h.window.document.getElementById("connect-from-menu")!.hidden, false);
+  assert.equal(h.window.document.getElementById("connect-from-menu")!.textContent, "Sign in");
+  view.dispose(); h.window.close(); f.close();
+});
 test("failed sign-out preserves text and never reports a successful physical close", async () => {
   const f = await applicationFixture(), h = dom();
   f.fixture.controls.publishSnapshot({...f.ready, status: "opening", signIn: {requestId: "fixture-request", installationId: "fixture-installation", deviceId: "fixture-device", appId: "journal.fixture", kind: "app-runtime", verificationUri: "https://fixture.example/verify", state: "paired", accountId: "fixture-account", collectionIds: [f.connection.id], createCollections: false, requestedCreateCollections: false}});
