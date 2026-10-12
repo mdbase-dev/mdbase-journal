@@ -38,6 +38,8 @@ test("unregistered local writing opens a blank page and never needs an SDK", () 
   const a = mountJournal(h.window.document, drafts, null);
   h.write("A private page"); assert.equal(a.currentDraft().body, "A private page");
   assert.match(h.window.document.getElementById("status")!.textContent!, /Sign-in is unavailable in this build/);
+  // UX-010: the status button names what it does and the current status.
+  assert.match(h.window.document.getElementById("status-button")!.getAttribute("aria-label")!, /^Journal settings\. On this device\. Sign-in is unavailable/);
   const id = a.currentDraft().id; a.dispose();
   const b = mountJournal(h.window.document, drafts, null);
   assert.notEqual(b.currentDraft().id, id); assert.equal(h.page.value, ""); assert.equal(drafts.get(id)?.body, "A private page");

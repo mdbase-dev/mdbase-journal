@@ -91,6 +91,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
       data ? "On this device" : "On this device. Sign in to save.";
     status.textContent = message;
     status.setAttribute("role", problem ? "alert" : "status");
+    // The button's own name: what pressing it does, then the current status.
+    element("status-button").setAttribute("aria-label", `${problem && data ? "Save again" : "Journal settings"}. ${message}`);
     const other = unresolved.filter(draft => draft.targetCollectionId && draft.targetCollectionId !== state?.selectedCollectionId).length;
     const legacy = drafts.legacyPendingCount();
     pending.textContent = `${unresolved.length} note${unresolved.length === 1 ? "" : "s"} on this device${other ? `; ${other} waiting for another collection` : ""}${legacy ? `; ${legacy} earlier prototype note${legacy === 1 ? "" : "s"} preserved separately` : ""}`;
