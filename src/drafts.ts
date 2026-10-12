@@ -219,9 +219,12 @@ export function localIso(date: Date): string {
   const offset = -date.getTimezoneOffset();
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${offset >= 0 ? "+" : "-"}${pad(Math.floor(Math.abs(offset) / 60))}:${pad(Math.abs(offset) % 60)}`;
 }
+/** A recognisable local date-time name (`2026-10-12 18.57 efe038.md`). The
+ * short suffix comes from the draft's random identity, so pages started in the
+ * same minute get distinct paths up front and creation never retries a sibling. */
 export function notePath(date: Date, folder: string, draftId?: string): string {
   if (draftId !== undefined && !uuid(draftId)) throw new Error("The original local note identity is missing.");
   const root = folder.trim().replace(/^\/+|\/+$/g, "");
   if (root.split("/").some(part => part === "." || part === "..") || /[\u0000-\u001f\u007f\\]/.test(root)) throw new Error("Choose a folder within this collection.");
-  return `${root ? root + "/" : ""}${date.getFullYear()}/${pad(date.getMonth() + 1)}/${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}${draftId ? `-${draftId}` : ""}.md`;
+  return `${root ? root + "/" : ""}${date.getFullYear()}/${pad(date.getMonth() + 1)}/${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}.${pad(date.getMinutes())}${draftId ? ` ${draftId.slice(0, 6).toLowerCase()}` : ""}.md`;
 }

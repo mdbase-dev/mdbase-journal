@@ -181,7 +181,11 @@ test("an oversized legacy copy does not prevent importing a later small entry", 
   assert.equal(imported[0]!.createdMs, 1744099811234); assert.equal(imported[0]!.touchedMs, 1744099823456);
   assert.equal(storage.getItem("journal.note.large"), large); assert.equal(storage.getItem("journal.note.small"), small);
 });
-test("two pages in the same second allocate distinct initial paths, never retry sibling paths", () => {
-  const drafts = new JournalDrafts(memoryStorage()), date = new Date(), a = drafts.blank(null, date), b = drafts.blank(null, date);
-  assert.notEqual(notePath(date, "journal", a.id), notePath(date, "journal", b.id));
+test("new pages get a recognisable date-time name without the UUID, distinct within the same instant", () => {
+  const drafts = new JournalDrafts(memoryStorage()), date = new Date(2026, 9, 12, 18, 57, 9), a = drafts.blank(null, date), b = drafts.blank(null, date);
+  Object.assign(b, {id: a.id.slice(0, 5) + (a.id[5] === "0" ? "1" : "0") + a.id.slice(6)});
+  const first = notePath(date, "journal", a.id), second = notePath(date, "journal", b.id);
+  assert.match(first, /^journal\/2026\/10\/2026-10-12 18\.57 [0-9a-f]{6}\.md$/);
+  assert.ok(!first.includes(a.id) && !first.includes(a.id.slice(9)), "the path must not carry the draft UUID");
+  assert.notEqual(first, second);
 });

@@ -7,7 +7,7 @@ test("blank pages have independent durable identities and fixed local time", () 
   const a = drafts.create(null, date), b = drafts.create(null, date);
   assert.notEqual(a.id, b.id); assert.equal(a.body, ""); assert.equal(a.recordId, null); assert.equal(a.createdMs, date.getTime());
   assert.equal(new JournalDrafts(storage).get(a.id)?.created, a.created);
-  assert.equal(notePath(date, "/writing/"), "writing/2025/04/2025-04-08T09-10-11.md");
+  assert.equal(notePath(date, "/writing/"), "writing/2025/04/2025-04-08 09.10.md");
 });
 test("draft patches retain original destination and original creation capture", () => {
   const drafts = new JournalDrafts(memoryStorage()), draft = drafts.create("original");
