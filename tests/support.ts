@@ -58,7 +58,11 @@ export function asMdbase(entry: MdbaseApplicationEntry): Mdbase {
   return {getSnapshot: view, subscribe: listener => app.subscribe(listener), start: options => then(app.start(options)),
     signIn: options => then(app.authorize(options)), addCollection: options => then(app.approve(null, options)),
     approve: (id, options) => then(app.approve(id, options)), select: (id, options) => then(app.select(id, options)),
-    chooseAnother: options => then(app.chooseAnother(options)), forget: (id, options) => then(app.forget(id, options)),
+    chooseAnother: options => then(app.chooseAnother(options)),
+    refreshCollectionList: (options) =>
+      app.refreshCollectionList ? then(app.refreshCollectionList(options)) : Promise.reject(new Error("No refreshCollectionList")),
+    reauthorize: (options) => then(app.reauthorize(options)),
+    configure: (options) => then(app.configure(options)), forget: (id, options) => then(app.forget(id, options)),
     deleteCollection: (id, options) => then(app.deleteCollection(id, options)), requestAccess: (request, options) => app.requestAccess(request, options),
     assess: options => app.assess(options),
     setup: {plan: options => app.setup.plan(options), apply: async (plan, options) => ({outcome: "applied", snapshot: await then(app.setup.apply(plan, options))})},

@@ -19,11 +19,12 @@ function dom() {
   return {window, page, write(body: string) {page.value = body; page.dispatchEvent(new window.Event("input", {bubbles: true}));}, click(id: string) {window.document.getElementById(id)!.click();}};
 }
 test("actual public singleton is lazy not_started in a controlled browser host, not an unavailable shell", async () => {
+  // One realm: the SDK's page listeners pass this host's AbortSignal to its EventTarget.
   // Browser-host stand-ins qualify constructor laziness only, never native
   // initialization, registration, storage readiness or popup lifecycle.
   const h = dom(), descriptors = new Map<string, PropertyDescriptor | undefined>();
   const fetch = mock.method(globalThis, "fetch", () => {throw new Error("Unexpected network");});
-  for (const [name, value] of Object.entries({window: undefined, location: h.window.location, Worker: class {constructor() {throw new Error("Unexpected Worker");}}})) {
+  for (const [name, value] of Object.entries({window: undefined, location: h.window.location, document: h.window.document, AbortController: h.window.AbortController, Worker: class {constructor() {throw new Error("Unexpected Worker");}}})) {
     descriptors.set(name, Object.getOwnPropertyDescriptor(globalThis, name)); Object.defineProperty(globalThis, name, {configurable: true, value});
   }
   try {
