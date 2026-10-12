@@ -45,8 +45,8 @@ test("consumer build retains original same-artifact Worker/native bytes and no p
     assert.equal(native.inputs.registeredApplicationId,"build-fixture-only");
     assert.equal(JSON.parse(await readFile(resolve(output,".well-known/mdbase-app.json"),"utf8")).homepage,"https://journal.fixture/");
     const provenance=JSON.parse(await readFile(resolve(output,"sdk/native/provenance.lab.json"),"utf8"));
-    assert.equal(provenance.runtime.source.commit,"fa49f3d0474a3c5961f3b9986052ead07abcc943");
-    assert.equal(provenance.runtime.sha256,"9f90af73e1591cafe9c35bdd42f18ae49d5a91a0186e78695e841fecabcd833a");
+    assert.equal(provenance.runtime.source.commit,"3a1266b523670a9f0ca94a267d22ff238c2d862a");
+    assert.equal(provenance.runtime.sha256,"d8d9eec1786a3aaff252733a5cfb9768b7ea3819d681f07c6e51697a608f9aa4");
     assert.equal(provenance.verifier.clockOverride,false);
     const html=await readFile(resolve(root,"public/index.html"),"utf8");
     assert.match(html,/<script type="module" src="\.\/journal.js"><\/script>/);
