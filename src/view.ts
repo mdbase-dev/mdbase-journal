@@ -165,7 +165,10 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     element<HTMLButtonElement>("disconnect").textContent = "Sign out";
     element<HTMLButtonElement>("disconnect").disabled = busy;
     // Sign out only once signed in: a signed-out session still has a sign-in flow.
-    element("disconnect").hidden = !state?.signIn || !["unselected", "opening", "setup_required", "ready", "blocked"].includes(state.status);
+    element("disconnect").hidden = !application?.signOut || !state?.signIn || !["unselected", "opening", "setup_required", "ready", "blocked"].includes(state.status);
+    // Unsaved changes refuse sign-out with SDK copy (shown above); discarding them is explicit.
+    element<HTMLButtonElement>("sign-out-anyway").hidden = element("disconnect").hidden || actionProblem?.key !== "sign_out_pending_writes";
+    element<HTMLButtonElement>("sign-out-anyway").disabled = busy;
     const another = element<HTMLButtonElement>("reconnect-from-menu");
     another.textContent = "Choose another collection";
     another.hidden = (!requested && selection?.state !== "invalid") || state?.status === "closed";
@@ -183,13 +186,13 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     element("word-count").hidden = words === 0;
   }
   /** Invoke synchronously in the gesture stack. SDK reserves its own popup. */
-  async function act(action: () => Promise<unknown>, signIn = false): Promise<void> {
+  async function act(action: () => Promise<unknown>, signIn = false, fallback = "internal"): Promise<void> {
     if (disposed || (busy && !signIn)) return;
     // Only SDK sign-in gestures bypass the presentation busy flag.
     const ordinal = ++latestAction;
     pendingActions++; busy = true; problem = null; actionProblem = null;
     try {const pending = action(); render(); await pending; caller.signal.throwIfAborted();}
-    catch (error) {if (!caller.signal.aborted && ordinal === latestAction) actionProblem = describeError(error) ?? describeError("internal");}
+    catch (error) {if (!caller.signal.aborted && ordinal === latestAction) actionProblem = describeError(error) ?? describeError(fallback);}
     finally {pendingActions--; if (!caller.signal.aborted) {busy = pendingActions > 0; render();}}
   }
   function newPage(): void {
@@ -328,7 +331,13 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
   };
   listen(element("connect-from-menu"), "click", authorize);
   listen(element("reconnect-from-menu"), "click", () => {if (application) void act(() => application.chooseAnother({signal: caller.signal}));});
-  listen(element("disconnect"), "click", () => {if (application) void act(() => application.close());});
+  // Real sign-out: ends the mdbase session and erases this device's sign-in, so a
+  // reload stays signed out. Journal's own drafts stay on this device.
+  const signOut = (discard: boolean) => {
+    if (application?.signOut) void act(() => application.signOut!({signal: caller.signal, discard}), false, "sign_out_failed");
+  };
+  listen(element("disconnect"), "click", () => signOut(false));
+  listen(element("sign-out-anyway"), "click", () => signOut(true));
   listen(element("status-button"), "click", () => {if (problem && data) void save(); else openMenu();});
   const foreground = () => {if (application && !disposed) {try {application.setForeground(document.visibilityState === "visible");} catch {/* unavailable owner stays unavailable */}}};
   listen(document, "visibilitychange", foreground);

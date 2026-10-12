@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {mock, test} from "node:test";
-import {describeError} from "@mdbase-dev/sdk";
+import {describeError, mdbaseError} from "@mdbase-dev/sdk";
 import {readFileSync} from "node:fs";
 import {JSDOM} from "jsdom";
 import {JournalDrafts} from "../src/drafts.js";
@@ -270,19 +270,35 @@ test("signed out offers a working Reload to sign in, never a dead end", async ()
   assert.equal(h.window.document.getElementById("disconnect")!.hidden, true);
   view.dispose(); h.window.close(); f.close();
 });
-test("failed sign-out preserves text and never reports a successful physical close", async () => {
+const pairedSignIn = (collectionId: string) => ({requestId: "fixture-request", installationId: "fixture-installation", deviceId: "fixture-device", appId: "journal.fixture", kind: "app-runtime" as const, verificationUri: "https://fixture.example/verify", state: "paired" as const, accountId: "fixture-account", collectionIds: [collectionId], createCollections: false, requestedCreateCollections: false});
+test("failed sign-out preserves text and shows SDK sign-out copy, never close", async () => {
   const f = await applicationFixture(), h = dom();
-  f.fixture.controls.publishSnapshot({...f.ready, status: "opening", signIn: {requestId: "fixture-request", installationId: "fixture-installation", deviceId: "fixture-device", appId: "journal.fixture", kind: "app-runtime", verificationUri: "https://fixture.example/verify", state: "paired", accountId: "fixture-account", collectionIds: [f.connection.id], createCollections: false, requestedCreateCollections: false}});
+  f.fixture.controls.publishSnapshot({...f.ready, status: "opening", signIn: pairedSignIn(f.connection.id)});
   const drafts = new JournalDrafts(memoryStorage()), view = mountJournal(h.window.document, drafts, f.fixture.entry); h.write("Retained");
   const id = view.currentDraft().id;
-  f.fixture.controls.setHandler("close", () => {throw new Error("physical stop failed");});
+  f.fixture.controls.setHandler("signOut", () => {throw new Error("private stop failed");});
   assert.equal(h.window.document.getElementById("disconnect")!.hidden, false); h.click("disconnect"); await Promise.resolve(); await Promise.resolve();
-  assert(f.fixture.controls.observedActions().some(call => call.action === "close"));
+  assert(f.fixture.controls.observedActions().some(call => call.action === "signOut"));
+  assert.equal(f.fixture.controls.observedActions().some(call => call.action === "close"), false);
   assert.equal(view.currentDraft().id, id); assert.equal(view.currentDraft().body, "Retained");
-  assert.equal(h.window.document.getElementById("status")!.textContent, describeError("internal")!.title);
-  assert.match(h.window.document.getElementById("menu-connection")!.textContent!, /Reload/);
-  assert.doesNotMatch(h.window.document.getElementById("menu-connection")!.textContent!, /physical stop failed/);
-  assert.equal(f.records.link, "open");
+  assert.equal(h.window.document.getElementById("status")!.textContent, describeError("sign_out_failed")!.title);
+  assert.doesNotMatch(h.window.document.getElementById("menu-connection")!.textContent!, /private stop failed/);
+  view.dispose(); h.window.close(); f.close();
+});
+test("unsaved changes refuse sign-out until the person chooses Sign out anyway", async () => {
+  const f = await applicationFixture(), h = dom();
+  f.fixture.controls.publishSnapshot({...f.ready, status: "unselected", signIn: pairedSignIn(f.connection.id)});
+  const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.fixture.entry);
+  f.fixture.controls.setHandler("signOut", call => {if (!call.discard) throw mdbaseError("conflict", "pending", "sign_out_pending_writes");});
+  const anyway = h.window.document.getElementById("sign-out-anyway") as HTMLButtonElement;
+  assert.equal(anyway.hidden, true);
+  h.click("disconnect"); await Promise.resolve(); await Promise.resolve();
+  assert.match(h.window.document.getElementById("menu-connection")!.textContent!, new RegExp(describeError("sign_out_pending_writes")!.title));
+  assert.equal(anyway.hidden, false);
+  h.click("sign-out-anyway"); await Promise.resolve(); await Promise.resolve();
+  const calls = f.fixture.controls.observedActions().filter(call => call.action === "signOut");
+  assert.deepEqual(calls.map(call => call.discard ?? false), [false, true]);
+  assert.equal(f.fixture.controls.observedActions().some(call => call.action === "close"), false);
   view.dispose(); h.window.close(); f.close();
 });
 test("late catalog completion after disposal cannot start data writes or close a borrowed client", async () => {
