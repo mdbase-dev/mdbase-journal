@@ -10,7 +10,7 @@ export interface JournalApplicationInputs {
 export function createJournalApplication(inputs: JournalApplicationInputs): Mdbase {
   if (!inputs.registeredApplicationId.trim() || !["lab", "production"].includes(inputs.environment) || !inputs.origin) throw new Error("Journal needs its registered application build inputs before connecting.");
   return createMdbase({id: inputs.registeredApplicationId, name: manifest.name,
-    environment: inputs.environment, origin: inputs.origin, manifest});
+    environment: inputs.environment, origin: inputs.origin, manifest}, {followVisibility: true});
 }
 /** The ready phase's connection, fenced to its own collection and generation.
  * No URL parser, shadow selection or records-client wrapper. */
