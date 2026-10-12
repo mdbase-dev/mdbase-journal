@@ -43,10 +43,12 @@ export async function buildApplication({writingOnly=false,env=process.env,output
     outfile:resolve(output,"sdk/application/sdk.js"),metafile:true});
   for(const value of Object.values(sdk.metafile.outputs))assert.deepEqual(value.imports,[]);
   const app=await build({absWorkingDir:root,entryPoints:["src/main.ts"],bundle:true,platform:"browser",format:"esm",target:"es2022",
-    outfile:resolve(output,"journal.js"),metafile:true,define:{JOURNAL_APPLICATION_INPUTS:JSON.stringify(inputs)},
+    outfile:resolve(output,"journal.js"),metafile:true,define:{JOURNAL_APPLICATION_INPUTS:JSON.stringify(inputs),"process.env.NODE_ENV":JSON.stringify("production")},
     plugins:[{name:"public-sdk-entry",setup(builder){builder.onResolve({filter:/^@mdbase-dev\/sdk$/},()=>({path:"./sdk/application/sdk.js",external:true}));
       if(manifest)builder.onLoad({filter:/[\\/]public[\\/]\.well-known[\\/]mdbase-app\.json$/},()=>({contents:JSON.stringify(manifest),loader:"json"}));}}]});
   if(manifest)await writeJournalManifest(manifest,output);
+  // The shared collection UI's stylesheet, served beside journal.css (which maps its tokens).
+  await writeFile(resolve(output,"mdbase-collections.css"),await readFile(fileURLToPath(import.meta.resolve("@mdbase-dev/ui/collections.css"))));
   const imports=Object.values(app.metafile.outputs)[0].imports;
   assert(imports.length>0);
   assert.deepEqual([...new Set(imports.map(x=>x.path))],["./sdk/application/sdk.js"]);

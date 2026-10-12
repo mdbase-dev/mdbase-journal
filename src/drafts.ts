@@ -52,8 +52,6 @@ export interface JournalPreferences {
   folder: string;
   theme: "system" | "light" | "dark";
   entryTypes?: Record<string, string>;
-  /** Presentation hint only; selecting it still delegates to the SDK. */
-  collectionId?: string;
 }
 export class JournalDrafts {
   private readonly pins = new Map<string, number>();
@@ -68,15 +66,12 @@ export class JournalDrafts {
       const parse = (bytes: string | null): unknown => {try {return JSON.parse(bytes ?? "null");} catch {return null;}};
       const modern = parse(this.storage.getItem("journal.prefs.v2"));
       const oldBytes = object(modern) ? null : this.storage.getItem("journal.prefs.v1");
-      const oldCollection = object(modern) ? null : this.storage.getItem("journal.collection");
       const value = object(modern) ? modern : parse(oldBytes);
       const preferences: JournalPreferences = {folder: object(value) && typeof value.folder === "string" ? value.folder : "journal",
         theme: object(value) && (value.theme === "light" || value.theme === "dark") ? value.theme : "system"};
       if (object(value) && object(value.entryTypes)) preferences.entryTypes = Object.fromEntries(Object.entries(value.entryTypes)
         .filter(([id, type]) => id.length <= 200 && typeof type === "string" && type.length <= 200).slice(-64)) as Record<string, string>;
-      const collection = object(value) && typeof value.collectionId === "string" ? value.collectionId : parse(oldCollection);
-      if (typeof collection === "string" && collection.length <= 200 && collection.trim()) preferences.collectionId = collection;
-      if (!object(modern) && (oldBytes !== null || oldCollection !== null)) {
+      if (!object(modern) && oldBytes !== null) {
         try {this.savePreferences(preferences);} catch {/* Keep legacy choices in RAM; retry migration after storage recovers. */}
       }
       return preferences;

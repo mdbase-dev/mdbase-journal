@@ -13,11 +13,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,400&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./mdbase-collections.css">
 <link rel="stylesheet" href="./journal.css">
 </head>
 <body>
 <header>
-  <div class="context"><span id="when"></span><span id="collection-name" hidden></span></div>
+  <div class="context"><span id="when"></span><span id="collection-switcher" hidden></span></div>
   <button id="menu-button" aria-haspopup="dialog" aria-controls="menu" aria-label="Journal settings">•••</button>
 </header>
 <main>
@@ -35,12 +36,8 @@
   <div class="sheet">
     <h2 id="journal-settings-title">Journal</h2>
     <p id="menu-connection"></p>
-    <a id="update-app" target="_blank" rel="noopener noreferrer" hidden>Update the app</a>
     <div id="collection-row" class="row">
-      <label for="collection-choice">Collection</label>
-      <select id="collection-choice"></select>
-      <button id="last-collection" hidden>Open last used collection</button>
-      <div id="collection-availability" hidden></div>
+      <div id="collection-panel"></div>
       <p>Switching starts a new page. Existing notes stay with their original collection.</p>
     </div>
     <div class="row">
@@ -66,10 +63,6 @@
     </div>
     <p>To read old notes, open the collection in Editor or any other app.</p>
     <div class="actions">
-      <button id="disconnect" hidden>Sign out</button>
-      <button id="sign-out-anyway" hidden>Sign out anyway</button>
-      <button id="reconnect-from-menu" hidden>Forget selected collection</button>
-      <button id="connect-from-menu" class="primary">Sign in</button>
       <button id="close-menu">Done</button>
     </div>
   </div>

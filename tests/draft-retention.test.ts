@@ -129,13 +129,13 @@ test("UTF-16 storage budget rejects growth before overwriting original text or f
   assert.throws(() => drafts.patch(draft.id, {body: "日".repeat(2000)}), DraftPersistenceError);
   assert.equal(storage.getItem("journal.native.note." + draft.id), before); assert.equal(storage.getItem("another-app"), "untouched");
 });
-test("legacy entry-type and collection preferences survive theme/folder edits as hints only", () => {
+test("legacy entry-type preferences survive theme/folder edits; a remembered collection is not read", () => {
   const storage = memoryStorage(); storage.setItem("journal.collection", JSON.stringify("remembered"));
-  storage.setItem("journal.prefs.v1", JSON.stringify({theme: "dark", folder: "writing", entryTypes: {remembered: "custom-entry"}}));
+  storage.setItem("journal.prefs.v1", JSON.stringify({theme: "dark", folder: "writing", entryTypes: {remembered: "custom-entry"}, collectionId: "remembered"}));
   const drafts = new JournalDrafts(storage), preferences = drafts.preferences();
-  assert.deepEqual(preferences.entryTypes, {remembered: "custom-entry"}); assert.equal(preferences.collectionId, "remembered");
+  assert.deepEqual(preferences, {theme: "dark", folder: "writing", entryTypes: {remembered: "custom-entry"}});
   drafts.savePreferences({...preferences, folder: "other", theme: "light"});
-  assert.equal(drafts.preferences().entryTypes?.remembered, "custom-entry"); assert.equal(drafts.preferences().collectionId, "remembered");
+  assert.equal(drafts.preferences().entryTypes?.remembered, "custom-entry");
   assert.equal(storage.getItem("journal.collection"), JSON.stringify("remembered"));
 });
 test("legacy settings migrate once to v2 without changing original bytes or rereading old hints", () => {
@@ -146,12 +146,6 @@ test("legacy settings migrate once to v2 without changing original bytes or rere
   const get = storage.getItem;
   storage.getItem = key => {if (key === "journal.prefs.v1" || key === "journal.collection") throw new Error("legacy key read again"); return get(key);};
   assert.deepEqual(new JournalDrafts(storage).preferences(), expected);
-});
-test("an intentionally cleared modern collection hint cannot resurrect the old collection", () => {
-  const storage = memoryStorage(); storage.setItem("journal.collection", JSON.stringify("old"));
-  const drafts = new JournalDrafts(storage); assert.equal(drafts.preferences().collectionId, "old");
-  drafts.savePreferences({folder: "new", theme: "system"});
-  assert.deepEqual(new JournalDrafts(storage).preferences(), {folder: "new", theme: "system"});
 });
 test("quota during preference migration retains legacy choices and retries safely", () => {
   const storage = memoryStorage(), bytes = JSON.stringify({theme: "light", folder: "original", entryTypes: {old: "custom"}});
@@ -165,11 +159,6 @@ test("quota during preference migration retains legacy choices and retries safel
 test("preference reads on a fresh empty visit allocate no storage", () => {
   const storage = memoryStorage(); assert.deepEqual(new JournalDrafts(storage).preferences(), {theme: "system", folder: "journal"});
   assert.equal(storage.length, 0);
-});
-test("malformed legacy collection hint does not reset valid preferences", () => {
-  const storage = memoryStorage(); storage.setItem("journal.collection", "invalid json");
-  storage.setItem("journal.prefs.v1", JSON.stringify({theme: "dark", folder: "writing"}));
-  assert.deepEqual(new JournalDrafts(storage).preferences(), {theme: "dark", folder: "writing"});
 });
 test("an oversized legacy copy does not prevent importing a later small entry", () => {
   const storage = memoryStorage();

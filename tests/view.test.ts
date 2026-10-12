@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import {mock, test} from "node:test";
-import {describeError, mdbaseError} from "@mdbase-dev/sdk";
 import {readFileSync} from "node:fs";
 import {JSDOM} from "jsdom";
 import {JournalDrafts} from "../src/drafts.js";
@@ -9,6 +8,11 @@ import {createJournalApplication, journalConnection} from "../src/application.js
 import {applicationFixture, catalog, deferred, memoryStorage, snapshot} from "./support.js";
 // Parse the actual writing surface; no old inline script or network executes.
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+/** The shared collection UI renders with React, which commits asynchronously. */
+async function until<T>(find: () => T | undefined): Promise<T> {
+  for (let i = 0; i < 100; i++) {const found = find(); if (found) return found; await new Promise(resolve => setTimeout(resolve, 5));}
+  throw new Error("Timed out waiting for the shared collection UI");
+}
 function dom() {
   const window = new JSDOM(html, {url: "https://journal.fixture/", runScripts: "outside-only"}).window;
   const page = window.document.querySelector<HTMLTextAreaElement>("#page")!;
@@ -19,15 +23,15 @@ test("actual public singleton is lazy not_started in a controlled browser host, 
   // initialization, registration, storage readiness or popup lifecycle.
   const h = dom(), descriptors = new Map<string, PropertyDescriptor | undefined>();
   const fetch = mock.method(globalThis, "fetch", () => {throw new Error("Unexpected network");});
-  for (const [name, value] of Object.entries({location: h.window.location, Worker: class {constructor() {throw new Error("Unexpected Worker");}}})) {
+  for (const [name, value] of Object.entries({window: undefined, location: h.window.location, Worker: class {constructor() {throw new Error("Unexpected Worker");}}})) {
     descriptors.set(name, Object.getOwnPropertyDescriptor(globalThis, name)); Object.defineProperty(globalThis, name, {configurable: true, value});
   }
   try {
-    const entry = createJournalApplication({registeredApplicationId: "build-fixture-only", environment: "lab", origin: "https://journal.fixture"});
-    const state = entry.application().getSnapshot();
+    const mdbase = createJournalApplication({registeredApplicationId: "build-fixture-only", environment: "lab", origin: "https://journal.fixture"});
+    const state = mdbase.getSnapshot();
     assert.equal(state.status, "not_started"); assert.equal(state.problem, null); assert.equal(state.selection.state, "none");
-    assert.equal(state.readiness.assessment, null); assert.equal(entry.connection("22222222-2222-4222-8222-222222222222"), null);
-    assert.equal(fetch.mock.callCount(), 0); await entry.application().close();
+    assert.equal(state.readiness.assessment, null); assert.equal(mdbase.connection("22222222-2222-4222-8222-222222222222"), null);
+    assert.equal(fetch.mock.callCount(), 0); await mdbase.close();
   } finally {
     fetch.mock.restore(); for (const [name, descriptor] of descriptors) {if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name);}
     h.window.close();
@@ -155,7 +159,7 @@ test("initial quota failure keeps writing usable and recovers the same draft aft
 test("SDK selection notification during a storage failure cannot clear or repin the page", async () => {
   const f = await applicationFixture(), h = dom(), storage = memoryStorage(), drafts = new JournalDrafts(storage);
   f.fixture.controls.publishSnapshot({...f.ready, status: "opening"});
-  const view = mountJournal(h.window.document, drafts, f.fixture.entry); h.write("Original destination"); const before = view.currentDraft();
+  const view = mountJournal(h.window.document, drafts, f.mdbase); h.write("Original destination"); const before = view.currentDraft();
   storage.setItem = () => {throw new Error("quota");};
   assert.doesNotThrow(() => f.fixture.controls.publishSnapshot(snapshot({selectedCollectionId: "other"})));
   assert.equal(h.page.value, "Original destination"); assert.equal(view.currentDraft().id, before.id);
@@ -170,141 +174,54 @@ test("existing preferences and script-like text render as data", () => {
   assert(view.currentDraft().path?.startsWith("writing/")); assert.match(h.window.document.getElementById("word-count")!.textContent!, /words/);
   view.dispose(); h.window.close();
 });
-test("public fixture selection belongs to the SDK, not a second URL or storage parser", async () => {
-  const f = await applicationFixture(), h = dom(), drafts = new JournalDrafts(memoryStorage());
-  f.fixture.controls.publishSnapshot(snapshot({status: "unselected", collections: f.ready.collections}));
-  const view = mountJournal(h.window.document, drafts, f.fixture.entry);
-  const choice = h.window.document.getElementById("collection-choice") as HTMLSelectElement;
-  choice.value = f.connection.id; choice.dispatchEvent(new h.window.Event("change")); await Promise.resolve();
-  assert.equal(f.fixture.controls.observedActions().find(call => call.action === "select")?.collectionId, f.connection.id);
-  assert.equal(h.window.location.href, "https://journal.fixture/");
-  view.dispose(); h.window.close(); f.close();
-});
-test("readiness checking, explicit problems and retired clients cannot become usable connections", async () => {
+test("an open collection stays usable through re-checks; a retired client never is", async () => {
   const f = await applicationFixture();
   try {
-    assert.equal(journalConnection(f.fixture.entry)?.records, f.records);
-    f.fixture.controls.publishSnapshot({...f.ready, readiness: {...f.ready.readiness, checking: true}}); assert.equal(journalConnection(f.fixture.entry), null);
-    f.fixture.controls.publishSnapshot({...f.ready, readiness: {...f.ready.readiness, problem: {code: "test-read-failed"}}}); assert.equal(journalConnection(f.fixture.entry), null);
-    f.fixture.controls.publishSnapshot(f.ready); f.retire(); assert.equal(journalConnection(f.fixture.entry), null);
+    assert.equal(journalConnection(f.mdbase)?.records, f.records);
+    f.fixture.controls.publishSnapshot({...f.ready, readiness: {...f.ready.readiness, checking: true}});
+    assert.equal(journalConnection(f.mdbase)?.records, f.records, "a re-check keeps the open lease");
+    f.fixture.controls.publishSnapshot(f.ready); f.retire(); assert.equal(journalConnection(f.mdbase), null);
   } finally {f.close();}
 });
 test("application selection changes keep old text pinned and start a new page", async () => {
   const f = await applicationFixture(), h = dom(), drafts = new JournalDrafts(memoryStorage());
   f.fixture.controls.publishSnapshot({...f.ready, status: "opening"});
-  const view = mountJournal(h.window.document, drafts, f.fixture.entry); h.write("Original destination"); const original = view.currentDraft();
+  const view = mountJournal(h.window.document, drafts, f.mdbase); h.write("Original destination"); const original = view.currentDraft();
   f.fixture.controls.publishSnapshot(snapshot({status: "unselected", selectedCollectionId: "another", collections: [{collectionId: "another", displayName: "Work", role: "owner"}]}));
   assert.equal(h.page.value, ""); assert.equal(drafts.get(original.id)?.targetCollectionId, f.connection.id); assert.equal(drafts.get(original.id)?.body, "Original destination");
   assert.equal(view.currentDraft().targetCollectionId, "another"); view.undoNewPage(); assert.notEqual(view.currentDraft().id, original.id);
   view.dispose(); h.window.close(); f.close();
 });
-test("sign-in dispatch is synchronous in the click gesture and retains the original signal", async () => {
-  const f = await applicationFixture(), h = dom(); f.fixture.controls.publishSnapshot(snapshot());
-  let invoked = false;
-  f.fixture.controls.setHandler("approve", () => {invoked = true;});
-  const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.fixture.entry); h.click("connect-from-menu");
-  assert.equal(invoked, true); assert(f.fixture.controls.observedActions().find(call => call.action === "approve")?.signal);
-  await Promise.resolve(); view.dispose(); h.window.close(); f.close();
-});
-test("unapproved request cannot borrow the old ready client and approval stays a synchronous SDK action", async () => {
+test("an unapproved request cannot borrow the old ready client or move the page", async () => {
   const f = await applicationFixture(), h = dom(), drafts = new JournalDrafts(memoryStorage());
   f.fixture.controls.publishSnapshot({...f.ready, selection: {...f.ready.selection, state: "approval_required",
     requested: {collectionId: "22222222-2222-4222-8222-222222222222", source: "url", displayName: null, approved: false}}});
-  assert.equal(journalConnection(f.fixture.entry), null);
-  let invoked = false; f.fixture.controls.setHandler("approve", () => {invoked = true;});
-  const view = mountJournal(h.window.document, drafts, f.fixture.entry); h.write("Original destination");
+  assert.equal(journalConnection(f.mdbase), null);
+  const view = mountJournal(h.window.document, drafts, f.mdbase); h.write("Original destination");
   const original = view.currentDraft();
-  assert.match(h.window.document.getElementById("status")!.textContent!, /Approve the requested collection/);
+  assert.match(h.window.document.getElementById("status")!.textContent!, /Approve the collection/);
   assert.match(h.window.document.getElementById("menu-connection")!.textContent!, /stay on this device/);
-  h.click("connect-from-menu"); assert.equal(invoked, true);
-  assert(f.fixture.controls.observedActions().find(call => call.action === "approve")?.signal);
   assert.equal(view.currentDraft().body, original.body); assert.equal(view.currentDraft().targetCollectionId, f.connection.id);
   view.dispose(); h.window.close(); f.close();
 });
-test("review access delegates reauthorization without changing the original page", async () => {
-  const f = await applicationFixture(), h = dom();
-  f.fixture.controls.publishSnapshot({...f.ready, status: "opening"});
-  let invoked = false; f.fixture.controls.setHandler("reauthorize", () => {invoked = true;});
-  const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.fixture.entry); h.write("Retained");
-  const id = view.currentDraft().id; h.click("connect-from-menu"); assert.equal(invoked, true);
-  assert(f.fixture.controls.observedActions().find(call => call.action === "reauthorize")?.signal);
-  assert.equal(view.currentDraft().id, id); assert.equal(view.currentDraft().body, "Retained");
-  view.dispose(); h.window.close(); f.close();
-});
-test("setup delegates canonical configuration and preserves the same writing page", async () => {
-  const f = await applicationFixture(), h = dom(); f.fixture.controls.publishSnapshot({...f.ready, status: "setup_required"});
-  const drafts = new JournalDrafts(memoryStorage()), view = mountJournal(h.window.document, drafts, f.fixture.entry); h.write("Retained");
-  const id = view.currentDraft().id;
-  h.click("connect-from-menu"); await Promise.resolve(); await Promise.resolve();
-  assert(f.fixture.controls.observedActions().some(call => call.action === "configure"));
-  assert.equal(view.currentDraft().id, id); assert.equal(drafts.get(id)?.body, "Retained");
-  view.dispose(); h.window.close(); f.close();
-});
-test("choose another delegates SDK selection while the original draft stays pinned", async () => {
-  const f = await applicationFixture(), h = dom(); f.fixture.controls.publishSnapshot({...f.ready, status: "opening"});
-  const drafts = new JournalDrafts(memoryStorage()), view = mountJournal(h.window.document, drafts, f.fixture.entry); h.write("Retained");
-  const original = view.currentDraft(); h.click("reconnect-from-menu"); await Promise.resolve(); await Promise.resolve();
-  assert(f.fixture.controls.observedActions().find(call => call.action === "chooseAnother")?.signal);
-  assert.equal(drafts.get(original.id)?.body, "Retained"); assert.equal(drafts.get(original.id)?.targetCollectionId, f.connection.id);
-  view.dispose(); h.window.close(); f.close();
-});
-test("signed out with a pending sign-in flow offers Sign in, never Sign out", async () => {
-  // UX-005: settings showed an enabled Sign out next to Sign in before sign-in.
-  const f = await applicationFixture(), h = dom();
-  f.fixture.controls.publishSnapshot({...f.ready, status: "signed_out", selectedCollectionId: null, collections: [], selection: {...f.ready.selection, state: "none", usable: null, requested: {collectionId: null, source: "none", approved: false, displayName: null}}, signIn: {requestId: "fixture-request", installationId: "fixture-installation", deviceId: "fixture-device", appId: "journal.fixture", kind: "app-runtime", verificationUri: "https://fixture.example/verify", state: "pending", accountId: null, collectionIds: [], createCollections: false, requestedCreateCollections: false}});
-  const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.fixture.entry);
-  assert.equal(h.window.document.getElementById("disconnect")!.hidden, true);
-  assert.equal(h.window.document.getElementById("connect-from-menu")!.hidden, false);
-  assert.equal(h.window.document.getElementById("connect-from-menu")!.textContent, "Sign in");
-  view.dispose(); h.window.close(); f.close();
-});
-test("signed out offers a working Reload to sign in, never a dead end", async () => {
-  // UX-007: "Signed out. Reload to sign in again." showed no control to reload.
-  const f = await applicationFixture(), h = dom();
-  f.fixture.controls.publishSnapshot({...f.ready, status: "closed", signIn: null});
-  const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.fixture.entry);
-  const connect = h.window.document.getElementById("connect-from-menu") as HTMLButtonElement;
-  assert.equal(h.window.document.getElementById("status")!.textContent, "Signed out. Reload to sign in again.");
-  assert.equal(connect.hidden, false); assert.equal(connect.disabled, false);
-  assert.equal(connect.textContent, "Reload to sign in");
-  assert.equal(h.window.document.getElementById("disconnect")!.hidden, true);
-  view.dispose(); h.window.close(); f.close();
-});
 const pairedSignIn = (collectionId: string) => ({requestId: "fixture-request", installationId: "fixture-installation", deviceId: "fixture-device", appId: "journal.fixture", kind: "app-runtime" as const, verificationUri: "https://fixture.example/verify", state: "paired" as const, accountId: "fixture-account", collectionIds: [collectionId], createCollections: false, requestedCreateCollections: false});
-test("failed sign-out preserves text and shows SDK sign-out copy, never close", async () => {
+test("Sign out in settings goes through the SDK's signOut, never close, and keeps writing", async () => {
   const f = await applicationFixture(), h = dom();
-  f.fixture.controls.publishSnapshot({...f.ready, status: "opening", signIn: pairedSignIn(f.connection.id)});
-  const drafts = new JournalDrafts(memoryStorage()), view = mountJournal(h.window.document, drafts, f.fixture.entry); h.write("Retained");
-  const id = view.currentDraft().id;
-  f.fixture.controls.setHandler("signOut", () => {throw new Error("private stop failed");});
-  assert.equal(h.window.document.getElementById("disconnect")!.hidden, false); h.click("disconnect"); await Promise.resolve(); await Promise.resolve();
-  assert(f.fixture.controls.observedActions().some(call => call.action === "signOut"));
-  assert.equal(f.fixture.controls.observedActions().some(call => call.action === "close"), false);
-  assert.equal(view.currentDraft().id, id); assert.equal(view.currentDraft().body, "Retained");
-  assert.equal(h.window.document.getElementById("status")!.textContent, describeError("sign_out_failed")!.title);
-  assert.doesNotMatch(h.window.document.getElementById("menu-connection")!.textContent!, /private stop failed/);
-  view.dispose(); h.window.close(); f.close();
-});
-test("unsaved changes refuse sign-out until the person chooses Sign out anyway", async () => {
-  const f = await applicationFixture(), h = dom();
-  f.fixture.controls.publishSnapshot({...f.ready, status: "unselected", signIn: pairedSignIn(f.connection.id)});
-  const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.fixture.entry);
-  f.fixture.controls.setHandler("signOut", call => {if (!call.discard) throw mdbaseError("conflict", "pending", "sign_out_pending_writes");});
-  const anyway = h.window.document.getElementById("sign-out-anyway") as HTMLButtonElement;
-  assert.equal(anyway.hidden, true);
-  h.click("disconnect"); await Promise.resolve(); await Promise.resolve();
-  assert.match(h.window.document.getElementById("menu-connection")!.textContent!, new RegExp(describeError("sign_out_pending_writes")!.title));
-  assert.equal(anyway.hidden, false);
-  h.click("sign-out-anyway"); await Promise.resolve(); await Promise.resolve();
-  const calls = f.fixture.controls.observedActions().filter(call => call.action === "signOut");
-  assert.deepEqual(calls.map(call => call.discard ?? false), [false, true]);
-  assert.equal(f.fixture.controls.observedActions().some(call => call.action === "close"), false);
-  view.dispose(); h.window.close(); f.close();
+  f.fixture.controls.publishSnapshot({...f.ready, status: "unselected", selectedCollectionId: null, signIn: pairedSignIn(f.connection.id),
+    selection: {...f.ready.selection, state: "none", usable: null, requested: {collectionId: null, source: "none", approved: false, displayName: null}}});
+  const drafts = new JournalDrafts(memoryStorage()), view = mountJournal(h.window.document, drafts, f.mdbase); h.write("Retained");
+  try {
+    const signOut = await until(() => [...h.window.document.querySelectorAll<HTMLButtonElement>("#collection-panel button")].find(button => button.textContent === "Sign out"));
+    signOut.click();
+    await until(() => f.fixture.controls.observedActions().some(call => call.action === "signOut") || undefined);
+    assert.equal(f.fixture.controls.observedActions().some(call => call.action === "close"), false);
+    assert.equal(view.currentDraft().body, "Retained");
+  } finally {view.dispose(); h.window.close(); f.close();}
 });
 test("late catalog completion after disposal cannot start data writes or close a borrowed client", async () => {
   const f = await applicationFixture(), h = dom(), job = deferred<ReturnType<typeof catalog>>();
   const describe = mock.method(f.records, "describe", () => job.promise), close = mock.method(f.records, "close"), create = mock.method(f.records, "create");
-  const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.fixture.entry);
+  const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.mdbase);
   h.write("Local"); view.dispose(); job.resolve(catalog()); await Promise.resolve(); await Promise.resolve();
   assert.equal(create.mock.callCount(), 0); assert.equal(close.mock.callCount(), 0); assert.equal(f.records.link, "open");
   describe.mock.restore(); create.mock.restore(); close.mock.restore(); h.window.close(); f.close();

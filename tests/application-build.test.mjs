@@ -32,7 +32,12 @@ test("consumer build retains original same-artifact Worker/native bytes and no p
     const result=await buildApplication({writingOnly:true,env:{},output});
     assert.equal(result.inputs,null);assert.equal(result.writingOnly,true);
     assert(Object.keys(result.sdk.inputs).every(path=>!path.includes("/testing/")));
-    assert.deepEqual(Object.keys(result.application.inputs).sort(),["public/.well-known/mdbase-app.json","src/application.ts","src/draft-opens.ts","src/drafts.ts","src/journal-data.ts","src/main.ts","src/returning-notice.ts","src/view.ts"]);
+    const inputs=Object.keys(result.application.inputs),bundled=inputs.filter(path=>path.startsWith("node_modules/"));
+    assert.deepEqual(inputs.filter(path=>!bundled.includes(path)).sort(),["public/.well-known/mdbase-app.json","src/application.ts","src/draft-opens.ts","src/drafts.ts","src/journal-data.ts","src/main.ts","src/returning-notice.ts","src/view.ts"]);
+    // Bundled: the shared collection UI with React, and only the SDK's describe (copy) modules.
+    assert.deepEqual([...new Set(bundled.map(path=>path.split("/").slice(1,path.startsWith("node_modules/@")?3:2).join("/")))].sort(),["@mdbase-dev/sdk","@mdbase-dev/ui","react","react-dom","scheduler"]);
+    assert(bundled.filter(path=>path.startsWith("node_modules/@mdbase-dev/sdk/")).every(path=>!/\/(testing|native)\/|application\/(entry|worker)/.test(path)));
+    assert.equal(await readFile(resolve(output,"mdbase-collections.css"),"utf8"),await readFile(resolve(root,"node_modules/@mdbase-dev/ui/css/collections.css"),"utf8"));
     for(const member of ["application/worker.js","native/sqlite3.js","native/runtime-lab.wasm","native/sqlite3.wasm"]){
       const archive=resolve(root,"vendor/mdbase-dev-sdk-fb3308a8.tgz");
       const original=execFileSync("tar",["-xOf",archive,`package/dist/${member}`],{maxBuffer:16*1024*1024});

@@ -15,12 +15,17 @@
   },
   "dependencies": {
     "@mdbase-dev/connect-protocol": "file:vendor/mdbase-dev-connect-protocol-0.1.0-beta.129-c280cd194ffd.tgz",
-    "@mdbase-dev/sdk": "file:vendor/mdbase-dev-sdk-fb3308a8.tgz"
+    "@mdbase-dev/sdk": "file:vendor/mdbase-dev-sdk-fb3308a8.tgz",
+    "@mdbase-dev/ui": "file:vendor/ui-dev-25f3b96a.tgz",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@mdbase-dev/connect-dev": "0.1.0-beta.123",
     "@types/jsdom": "21.1.7",
     "@types/node": "22.19.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
     "esbuild": "0.28.1",
     "jsdom": "26.1.0",
     "typescript": "5.9.3"

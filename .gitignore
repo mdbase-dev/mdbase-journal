@@ -4,3 +4,4 @@ public/journal.js
 .test-build-*/
 .application-build-*/
 .typed-tests-first/
+public/mdbase-collections.css
