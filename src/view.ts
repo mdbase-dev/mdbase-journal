@@ -158,8 +158,10 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     connect.textContent = description?.action === "sign_in" ? description.actionLabel ?? "Sign in" :
       authorizing ? "Sign in" : selection?.state === "usable" && state?.status === "setup_required" ? "Set up Journal" :
       selection?.state === "usable" ? "Review access" : selection?.state === "approval_required" ? "Approve this collection" : "Sign in";
-    connect.hidden = state?.status === "closed";
-    connect.disabled = (busy && !signInAction) || !application || state?.problem === "application_not_yet_available";
+    // Signed out: signing in again needs a fresh page, so offer that as the action.
+    const closed = state?.status === "closed";
+    if (closed) connect.textContent = "Reload to sign in";
+    connect.disabled = !closed && ((busy && !signInAction) || !application || state?.problem === "application_not_yet_available");
     element<HTMLButtonElement>("disconnect").textContent = "Sign out";
     element<HTMLButtonElement>("disconnect").disabled = busy;
     // Sign out only once signed in: a signed-out session still has a sign-in flow.
@@ -317,6 +319,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, entry: M
     save();
   });
   const authorize = () => {
+    if (snapshot()?.status === "closed") {document.defaultView?.location.reload(); return;}
     if (!application) return;
     const state = snapshot(), usable = state?.selection.state === "usable";
     const signIn = describeError(state)?.action === "sign_in" || state?.status === "authorizing" || state?.selection.state === "approving" || !usable;

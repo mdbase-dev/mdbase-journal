@@ -258,6 +258,18 @@ test("signed out with a pending sign-in flow offers Sign in, never Sign out", as
   assert.equal(h.window.document.getElementById("connect-from-menu")!.textContent, "Sign in");
   view.dispose(); h.window.close(); f.close();
 });
+test("signed out offers a working Reload to sign in, never a dead end", async () => {
+  // UX-007: "Signed out. Reload to sign in again." showed no control to reload.
+  const f = await applicationFixture(), h = dom();
+  f.fixture.controls.publishSnapshot({...f.ready, status: "closed", signIn: null});
+  const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.fixture.entry);
+  const connect = h.window.document.getElementById("connect-from-menu") as HTMLButtonElement;
+  assert.equal(h.window.document.getElementById("status")!.textContent, "Signed out. Reload to sign in again.");
+  assert.equal(connect.hidden, false); assert.equal(connect.disabled, false);
+  assert.equal(connect.textContent, "Reload to sign in");
+  assert.equal(h.window.document.getElementById("disconnect")!.hidden, true);
+  view.dispose(); h.window.close(); f.close();
+});
 test("failed sign-out preserves text and never reports a successful physical close", async () => {
   const f = await applicationFixture(), h = dom();
   f.fixture.controls.publishSnapshot({...f.ready, status: "opening", signIn: {requestId: "fixture-request", installationId: "fixture-installation", deviceId: "fixture-device", appId: "journal.fixture", kind: "app-runtime", verificationUri: "https://fixture.example/verify", state: "paired", accountId: "fixture-account", collectionIds: [f.connection.id], createCollections: false, requestedCreateCollections: false}});
