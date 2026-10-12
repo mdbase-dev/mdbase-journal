@@ -21,7 +21,7 @@ export async function buildApplication({writingOnly=false,env=process.env,output
   const inputs=writingOnly?null:applicationInputs(env);
   // Native builds declare their own origin as the manifest homepage, as SDK registration requires.
   const manifest=inputs&&await buildJournalManifest({origin:inputs.origin,allowLocal:inputs.environment==="lab"});
-  const pin=JSON.parse(await readFile(resolve(root,"vendor/mdbase-sdk-dev-8b18a6c7.json"),"utf8"));
+  const pin=JSON.parse(await readFile(resolve(root,"vendor/mdbase-sdk-dev-0f9a3614.json"),"utf8"));
   const archive=resolve(root,"vendor",pin.artifact),bytes=await readFile(archive);
   assert.equal(bytes.length,pin.bytes);assert.equal(hash(bytes,"sha256"),pin.sha256);assert.equal(`sha512-${hash(bytes,"sha512","base64")}`,pin.integrity);
   const protocol=await readFile(resolve(root,pin.protocol.file));
