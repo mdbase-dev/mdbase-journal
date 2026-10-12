@@ -45,6 +45,7 @@ void test("a write kept on this device while offline does not offer Retry", {tim
     await new Promise(resolve => setTimeout(resolve, 200));
     assert.equal(drafts.get(view.currentDraft().id)?.savedBody, null, "still waiting for sync");
     assert.equal(retry.hidden, true); assert.equal(h.window.document.body.classList.contains("retry"), false);
+    assert.equal(status.textContent, "Saved on this device; waiting for sync");
     f.replica.setOnline(true); f.replica.confirmAll();
     await until(() => status.textContent === "Saved"); assert.equal(retry.hidden, true);
   } finally {view.dispose(); describe.mock.restore(); h.window.close(); f.close();}

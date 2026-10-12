@@ -95,7 +95,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     if (!message && phase?.kind === "ready" && (phase.problem || state?.problem)) message = state?.sync?.text ?? phase.problem?.title ?? describeError(state)?.title;
     if (!message && opening) message = "Saving…";
     if (!message && record) {
-      message = record.state === "saved" && current.body === current.savedBody ? "Saved" : record.state === "saving" ? "Saving…" : "On this device";
+      message = record.state === "saved" && current.body === current.savedBody ? "Saved" : record.state === "saving" ? "Saving…" :
+        record.state === "saved_on_device" ? "Saved on this device; waiting for sync" : "On this device";
     }
     if (!message) message = !phase ? "On this device. Sign-in is unavailable in this build." :
       phase.kind === "unavailable" ? "On this device. Opening collections isn't available here." :
@@ -123,7 +124,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
         draft.targetCollectionId && draft.targetCollectionId !== openId ? "Waiting for its collection" :
         data?.problem(draft.id) ? "Original save needs attention" : saving?.state === "unresolved" ? "Original save unresolved" :
         saving?.state === "opening" || record?.state === "saving" ? "Saving…" :
-        record && ["conflict", "recovery", "deleted", "error"].includes(record.state) ? "Original save needs attention" : "On this device";
+        record && ["conflict", "recovery", "deleted", "error"].includes(record.state) ? "Original save needs attention" :
+        record?.state === "saved_on_device" ? "Saved on this device; waiting for sync" : "On this device";
       text.textContent = `${new Date(draft.createdMs).toLocaleString()} — ${state}`; row.append(text);
       if (draft.id !== current.id && recovering(draft.id)) {
         const again = document.createElement("button"); again.type = "button"; retryButton(again, draft.id);
