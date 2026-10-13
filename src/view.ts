@@ -247,25 +247,57 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       if (!disposed && data === owned) entriesProblem = "Saved entries could not be loaded. Notes on this device are still available.";
     }).finally(() => {if (!disposed && data === owned) {entriesLoading = false; renderEntries();}});
   }
-  function adjacentDay(offset: number): void {
-    const date = new Date(entryDate.value && entriesDialog.open ? `${entryDate.value}T12:00:00` : current.createdMs);
-    date.setDate(date.getDate() + offset); browse(dateKey(date.getTime()));
+  function startOnDate(date: Date): void {
+    if (memoryOnly || !Number.isFinite(date.getTime())) return;
+    try {
+      const next = drafts.blank(snapshot()?.selectedCollectionId ?? null, date);
+      if (current.body.trim()) drafts.patch(current.id, {finished: true, touchedMs: Date.now()});
+      current = next; unpersistedDraft = true;
+      clearUndo(); problem = null; renderPage(); render(); page.focus();
+    } catch {problem = "Keep this page open: Journal cannot preserve its text on this device."; render();}
+  }
+  let navigatingDay = false;
+  async function adjacentDay(offset: number): Promise<void> {
+    if (navigatingDay || memoryOnly) return;
+    const originalId = current.id, owned = data;
+    const date = new Date(current.createdMs);
+    date.setDate(date.getDate() + offset); date.setHours(12, 0, 0, 0);
+    const destination = dateKey(date.getTime());
+    const stillCurrent = (): boolean => !disposed && !memoryOnly && data === owned && current.id === originalId && !entriesDialog.open;
+    navigatingDay = true;
+    element<HTMLButtonElement>("previous-day").disabled = true;
+    element<HTMLButtonElement>("next-day").disabled = true;
+    try {
+      if (owned) {
+        const availableTypes = types.length ? types : await owned.types();
+        const loaded = await owned.entries(availableTypes);
+        if (!stillCurrent()) return;
+        entries = loaded;
+      }
+      const row = visibleEntries().find(row => dateKey(row.entry.createdMs) === destination);
+      if (row) {
+        const earlier = row.draft ?? await owned?.resume(row.entry);
+        if (!stillCurrent() || !earlier) return;
+        restoreDraft(earlier.id);
+      } else startOnDate(date);
+    } catch {
+      if (stillCurrent()) {problem = "This day could not be opened. Your current page is unchanged."; render();}
+    } finally {
+      navigatingDay = false;
+      element<HTMLButtonElement>("previous-day").disabled = false;
+      element<HTMLButtonElement>("next-day").disabled = false;
+    }
   }
   listen(element("browse-button"), "click", () => browse());
-  listen(element("previous-day"), "click", () => adjacentDay(-1));
-  listen(element("next-day"), "click", () => adjacentDay(1));
+  listen(element("previous-day"), "click", () => {void adjacentDay(-1);});
+  listen(element("next-day"), "click", () => {void adjacentDay(1);});
   listen(entryDate, "input", renderEntries);
   listen(element("close-entries"), "click", () => entriesDialog.close());
   listen(entriesDialog, "close", () => page.focus());
   listen(element("write-date"), "click", () => {
-    if (memoryOnly) return;
-    const date = entryDate.value ? new Date(`${entryDate.value}T12:00:00`) : new Date();
-    if (!Number.isFinite(date.getTime())) return;
-    try {
-      if (current.body.trim()) drafts.patch(current.id, {finished: true, touchedMs: Date.now()});
-      current = drafts.blank(snapshot()?.selectedCollectionId ?? null, date); unpersistedDraft = true;
-      clearUndo(); problem = null; renderPage(); render(); entriesDialog.close();
-    } catch {problem = "Keep this page open: Journal cannot preserve its text on this device."; render();}
+    const originalId = current.id;
+    startOnDate(entryDate.value ? new Date(`${entryDate.value}T12:00:00`) : new Date());
+    if (current.id !== originalId) entriesDialog.close();
   });
   function save(): void {
     const owned = data, selectedType = type, queue = opens;
