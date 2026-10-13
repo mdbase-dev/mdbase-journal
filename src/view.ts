@@ -238,8 +238,11 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     entryDate.value = date; entriesProblem = null; renderEntries();
     if (!entriesDialog.open) entriesDialog.showModal();
     const owned = data;
-    if (!owned || !types.length) return;
+    if (!owned) return;
     entriesLoading = true; renderEntries();
+    // The ready connection can arrive before its catalog. Its completion below
+    // refreshes this sheet; never mistake that interval for an empty journal.
+    if (!types.length) return;
     void owned.entries(types).then(value => {if (!disposed && data === owned) entries = value;}, () => {
       if (!disposed && data === owned) entriesProblem = "Saved entries could not be loaded. Notes on this device are still available.";
     }).finally(() => {if (!disposed && data === owned) {entriesLoading = false; renderEntries();}});
@@ -291,7 +294,11 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
           if (disposed || data !== owned) return;
           types = value; type = value.find(item => item.name === preferences.entryTypes?.[owned.connection.id]) ?? (value.length === 1 ? value[0]! : null);
           render(); void save();
-        }, error => {if (!disposed && data === owned) {actionProblem = describeError(error) ?? describeError("internal"); render();}});
+          if (entriesDialog.open) browse(entryDate.value);
+        }, error => {if (!disposed && data === owned) {
+          actionProblem = describeError(error) ?? describeError("internal");
+          entriesLoading = false; entriesProblem = "Saved entries could not be loaded. Notes on this device are still available."; render();
+        }});
       }
     }
     if (!memoryOnly && selectionChanged && selectedId !== current.targetCollectionId) {

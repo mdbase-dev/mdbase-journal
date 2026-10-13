@@ -5,7 +5,7 @@ import {JSDOM} from "jsdom";
 import {JournalDrafts} from "../src/drafts.js";
 import {JournalData, journalEntryTypes} from "../src/journal-data.js";
 import {mountJournal} from "../src/view.js";
-import {applicationFixture, catalog, memoryStorage} from "./support.js";
+import {applicationFixture, catalog, deferred, memoryStorage} from "./support.js";
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 test("date navigation lists every local page, resumes its identity and survives reload", () => {
   const window = new JSDOM(html, {url: "https://journal.fixture/"}).window, document = window.document;
@@ -32,6 +32,24 @@ test("date navigation lists every local page, resumes its identity and survives 
   assert.equal(drafts.get(first.id)?.body, "First January page");
   reloaded.dispose(); window.close();
 });
+test("browsing before the catalog is ready loads saved entries as soon as it arrives", async () => {
+  const h = await applicationFixture(), job = deferred<ReturnType<typeof catalog>>();
+  await h.records.save(h.records.create({type: "collection-owned-entry", path: "journal/earlier.md", frontmatter: {created: "2025-01-02T09:00:00+00:00"}, body: "Earlier saved entry"}));
+  const describe = mock.method(h.records, "describe", () => job.promise);
+  const window = new JSDOM(html, {url: "https://journal.fixture/"}).window, document = window.document;
+  const dialog = document.querySelector<HTMLDialogElement>("#entries")!;
+  dialog.showModal = () => dialog.setAttribute("open", ""); dialog.close = () => dialog.removeAttribute("open");
+  const view = mountJournal(document, new JournalDrafts(memoryStorage()), h.mdbase);
+  try {
+    document.getElementById("browse-button")!.click();
+    assert.match(document.getElementById("entries-status")!.textContent!, /Loading entries/);
+    job.resolve(catalog());
+    for (let i = 0; i < 100 && !document.querySelector("#entry-list button"); i++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(document.querySelectorAll("#entry-list button").length, 1);
+    assert.equal(document.getElementById("entries-status")!.textContent, "");
+  } finally {job.resolve(catalog()); describe.mock.restore(); view.dispose(); window.close(); h.close();}
+});
+
 test("saved entries use the bound type and original record, without another create", async () => {
   const h = await applicationFixture(), drafts = new JournalDrafts(memoryStorage()), data = new JournalData(h.connection, drafts);
   const type = journalEntryTypes(catalog("written", "my-entry"))[0]!;
