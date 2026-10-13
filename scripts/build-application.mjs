@@ -42,16 +42,22 @@ export async function buildApplication({writingOnly=false,env=process.env,output
   const sdk=await build({entryPoints:[resolve(installed,"index.js")],bundle:true,platform:"browser",format:"esm",target:"es2022",
     outfile:resolve(output,"sdk/application/sdk.js"),metafile:true});
   for(const value of Object.values(sdk.metafile.outputs))assert.deepEqual(value.imports,[]);
+  // The consent window's return (Private collections) loads only this, only there.
+  const grant=await build({stdin:{contents:'export {deliverAppGrantCallback} from "@mdbase-dev/sdk/app-grant";',resolveDir:root,loader:"js"},bundle:true,platform:"browser",format:"esm",target:"es2022",
+    outfile:resolve(output,"sdk/application/app-grant.js"),metafile:true});
+  for(const value of Object.values(grant.metafile.outputs))assert.deepEqual(value.imports,[]);
   const app=await build({absWorkingDir:root,entryPoints:["src/main.ts"],bundle:true,platform:"browser",format:"esm",target:"es2022",
     outfile:resolve(output,"journal.js"),metafile:true,define:{JOURNAL_APPLICATION_INPUTS:JSON.stringify(inputs),"process.env.NODE_ENV":JSON.stringify("production")},
     plugins:[{name:"public-sdk-entry",setup(builder){builder.onResolve({filter:/^@mdbase-dev\/sdk$/},()=>({path:"./sdk/application/sdk.js",external:true}));
+      builder.onResolve({filter:/^@mdbase-dev\/sdk\/app-grant$/},()=>({path:"./sdk/application/app-grant.js",external:true}));
       if(manifest)builder.onLoad({filter:/[\\/]public[\\/]\.well-known[\\/]mdbase-app\.json$/},()=>({contents:JSON.stringify(manifest),loader:"json"}));}}]});
   if(manifest)await writeJournalManifest(manifest,output);
   // The shared collection UI's stylesheet, served beside journal.css (which maps its tokens).
   await writeFile(resolve(output,"mdbase-collections.css"),await readFile(fileURLToPath(import.meta.resolve("@mdbase-dev/ui/collections.css"))));
   const imports=Object.values(app.metafile.outputs)[0].imports;
   assert(imports.length>0);
-  assert.deepEqual([...new Set(imports.map(x=>x.path))],["./sdk/application/sdk.js"]);
+  assert.deepEqual([...new Set(imports.filter(x=>x.kind!=="dynamic-import").map(x=>x.path))],["./sdk/application/sdk.js"]);
+  assert.deepEqual(imports.filter(x=>x.kind==="dynamic-import").map(x=>x.path),["./sdk/application/app-grant.js"]);
   return {sourceCommit:pin.sourceCommit,writingOnly,inputs,sdk: sdk.metafile,application:app.metafile};
 }
 if(process.argv[1]===fileURLToPath(import.meta.url))await buildApplication({writingOnly:process.argv.includes("--writing-only")});
