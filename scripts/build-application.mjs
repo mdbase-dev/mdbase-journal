@@ -1,3 +1,4 @@
+import {buildOfflineShell} from "@mdbase-dev/sdk/offline-shell/build";
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {execFileSync} from "node:child_process";
@@ -60,4 +61,7 @@ export async function buildApplication({writingOnly=false,env=process.env,output
   assert.deepEqual(imports.filter(x=>x.kind==="dynamic-import").map(x=>x.path),["./sdk/application/app-grant.js"]);
   return {sourceCommit:pin.sourceCommit,writingOnly,inputs,sdk: sdk.metafile,application:app.metafile};
 }
-if(process.argv[1]===fileURLToPath(import.meta.url))await buildApplication({writingOnly:process.argv.includes("--writing-only")});
+if(process.argv[1]===fileURLToPath(import.meta.url)){
+  await buildApplication({writingOnly:process.argv.includes("--writing-only")});
+  await buildOfflineShell({directory:resolve(root,"public")});
+}
