@@ -4,6 +4,7 @@ import {journalConnection} from "./application.js";
 import {DraftPersistenceError, JournalDrafts, notePath, type JournalDraft} from "./drafts.js";
 import {JournalData, type JournalEntryType} from "./journal-data.js";
 import {DraftOpens} from "./draft-opens.js";
+import {connectionNotice, connectionNoticeLabels} from "./connection-notice.js";
 export interface JournalView {dispose(): void; currentDraft(): JournalDraft; newPage(): void; undoNewPage(): void}
 const app = {name: "Journal"};
 /** Writing over the page's one mdbase entry. Local text never depends on sign-in.
@@ -93,6 +94,9 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     if (!message && record && ["conflict", "recovery", "deleted", "error"].includes(record.state)) message = "Your text is on this device. Resolve its original save before continuing.";
     if (!message && actionProblem) message = actionProblem.title;
     if (!message && phase?.kind === "ready" && (phase.problem || state?.problem)) message = state?.sync?.text ?? phase.problem?.title ?? describeError(state)?.title;
+    // Never "Saving…" or "Saved" while offline, reconnecting or holding changes on this device.
+    const notice = connectionNotice(state, document.defaultView?.navigator.onLine ?? true);
+    if (!message && notice) message = connectionNoticeLabels[notice];
     if (!message && opening) message = "Saving…";
     if (!message && record) {
       message = record.state === "saved" && current.body === current.savedBody ? "Saved" : record.state === "saving" ? "Saving…" :
@@ -282,6 +286,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   for (const name of ["pointermove", "wheel", "touchmove", "focusin"]) listen(document, name, () => document.body.classList.remove("quiet"));
   applyTheme();
   const unlistenApp = mdbase?.subscribe(changed) ?? (() => {});
+  if (document.defaultView) for (const name of ["online", "offline"]) listen(document.defaultView, name, render);
   // The shared panel starts the SDK; failures are on the snapshot, shown with their fix.
   renderPage(); changed(); render();
   return {currentDraft: () => current, newPage, undoNewPage, dispose() {

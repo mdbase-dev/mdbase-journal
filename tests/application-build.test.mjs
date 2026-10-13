@@ -33,7 +33,7 @@ test("consumer build retains original same-artifact Worker/native bytes and no p
     assert.equal(result.inputs,null);assert.equal(result.writingOnly,true);
     assert(Object.keys(result.sdk.inputs).every(path=>!path.includes("/testing/")));
     const inputs=Object.keys(result.application.inputs),bundled=inputs.filter(path=>path.startsWith("node_modules/"));
-    assert.deepEqual(inputs.filter(path=>!bundled.includes(path)).sort(),["public/.well-known/mdbase-app.json","src/application.ts","src/draft-opens.ts","src/drafts.ts","src/grant-callback.ts","src/journal-data.ts","src/main.ts","src/returning-notice.ts","src/view.ts"]);
+    assert.deepEqual(inputs.filter(path=>!bundled.includes(path)).sort(),["public/.well-known/mdbase-app.json","src/application.ts","src/connection-notice.ts","src/draft-opens.ts","src/drafts.ts","src/grant-callback.ts","src/journal-data.ts","src/main.ts","src/returning-notice.ts","src/view.ts"]);
     // Bundled: the shared collection UI with React, and only the SDK's describe (copy) modules.
     assert.deepEqual([...new Set(bundled.map(path=>path.split("/").slice(1,path.startsWith("node_modules/@")?3:2).join("/")))].sort(),["@mdbase-dev/sdk","@mdbase-dev/ui","react","react-dom","scheduler"]);
     assert(bundled.filter(path=>path.startsWith("node_modules/@mdbase-dev/sdk/")).every(path=>!/\/(testing|native)\/|application\/(entry|worker)/.test(path)));
