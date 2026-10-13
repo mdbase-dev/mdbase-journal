@@ -23,6 +23,18 @@
         "records.create",
         "records.edit"
       ]
+    },
+    "files": {
+      "required": [
+        "list",
+        "read",
+        "add",
+        "replace",
+        "move"
+      ],
+      "scope": {
+        "kind": "collection"
+      }
     }
   },
   "provisions": {

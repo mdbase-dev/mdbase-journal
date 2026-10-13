@@ -71,6 +71,13 @@ export async function buildJournalManifest({ origin = DEFAULT_JOURNAL_ORIGIN, al
       capabilities: {
         contract_version: 2,
         required: ["collection.read", "records.create", "records.edit"]
+      },
+      // Next accounts approve each record capability together with its file
+      // actions: reading needs list and read, creating needs add, editing
+      // needs replace and move.
+      files: {
+        required: ["list", "read", "add", "replace", "move"],
+        scope: { kind: "collection" }
       }
     },
     provisions: { type_packs: [pack] }
