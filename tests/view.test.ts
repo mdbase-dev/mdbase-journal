@@ -9,8 +9,8 @@ import {applicationFixture, catalog, deferred, memoryStorage, snapshot} from "./
 // Parse the actual writing surface; no old inline script or network executes.
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 /** The shared collection UI renders with React, which commits asynchronously. */
-async function until<T>(find: () => T | undefined): Promise<T> {
-  for (let i = 0; i < 100; i++) {const found = find(); if (found) return found; await new Promise(resolve => setTimeout(resolve, 5));}
+async function until<T>(find: () => T | undefined, attempts = 100): Promise<T> {
+  for (let i = 0; i < attempts; i++) {const found = find(); if (found) return found; await new Promise(resolve => setTimeout(resolve, 5));}
   throw new Error("Timed out waiting for the shared collection UI");
 }
 function dom() {
@@ -219,6 +219,25 @@ test("Sign out in settings goes through the SDK's signOut, never close, and keep
     assert.equal(f.fixture.controls.observedActions().some(call => call.action === "close"), false);
     assert.equal(view.currentDraft().body, "Retained");
   } finally {view.dispose(); h.window.close(); f.close();}
+});
+test("a durable peer-tab edit feeds the same ready native lease without losing either addition", async () => {
+  const f = await applicationFixture(), ha = dom(), hb = dom(), storage = memoryStorage();
+  const a = new JournalDrafts(storage), b = new JournalDrafts(storage);
+  const describe = mock.method(f.records, "describe", async () => catalog());
+  const va = mountJournal(ha.window.document, a, f.mdbase);
+  let vb: ReturnType<typeof mountJournal> | null = null;
+  try {
+    ha.write("Seed\\nA");
+    await until(() => a.get(va.currentDraft().id)?.savedBody === "Seed\\nA" || undefined);
+    vb = mountJournal(hb.window.document, b, null);
+    hb.write("Seed\\nA\\nB");
+    ha.window.dispatchEvent(new ha.window.StorageEvent("storage", {key: `journal.native.note.${va.currentDraft().id}`}));
+    await until(() => a.get(va.currentDraft().id)?.savedBody === "Seed\\nA\\nB" || undefined, 500);
+    const draft = a.get(va.currentDraft().id)!;
+    assert.equal((await f.records.get(draft.recordId!, {body: true})).body, "Seed\\nA\\nB");
+    assert.equal(ha.page.value, "Seed\\nA\\nB");
+    assert.equal(draft.reviewRequired, undefined);
+  } finally {va.dispose(); vb?.dispose(); describe.mock.restore(); ha.window.close(); hb.window.close(); f.close();}
 });
 test("late catalog completion after disposal cannot start data writes or close a borrowed client", async () => {
   const f = await applicationFixture(), h = dom(), job = deferred<ReturnType<typeof catalog>>();

@@ -1,3 +1,6 @@
+import {revisionOf} from "@mdbase-dev/sdk";
+export const draftRevision = (body: string): string => revisionOf(body);
+export type DraftLock = <T>(operation: () => T) => Promise<T>;
 export interface CreateAttempt {
   readonly mutationId: string;
   readonly recordId: string;
@@ -14,6 +17,10 @@ export interface JournalDraft {
   readonly created: string;
   readonly createdMs: number;
   body: string;
+  /** Revision of the text actually read, not a fresh revision borrowed at save. */
+  readonly revision?: string;
+  /** Explicit review is required before replaying text from a stale native view. */
+  reviewRequired?: boolean;
   path: string | null;
   targetCollectionId: string | null;
   recordId: string | null;
@@ -34,11 +41,15 @@ function validDraft(value: unknown): value is JournalDraft {
       typeof value.body !== "string" || value.body.length > 4 * 1024 * 1024 || !textOrNull(value.path) || !textOrNull(value.targetCollectionId) ||
       !textOrNull(value.recordId) || !textOrNull(value.savedBody) || typeof value.finished !== "boolean" || !Number.isFinite(value.touchedMs)) return false;
   if (value.legacyKey !== undefined && (typeof value.legacyKey !== "string" || !value.legacyKey.startsWith("journal.note.") || value.legacyKey.length > 1024 || value.createAttempt !== null || value.recordId !== null)) return false;
+  if (value.reviewRequired !== undefined && typeof value.reviewRequired !== "boolean") return false;
   const attempt = value.createAttempt;
   if (attempt !== null && (!object(attempt) || ["body", "typeName", "createdField", "path", "created", "account", "installation"].some(key => typeof attempt[key] !== "string") ||
       !uuid(attempt.mutationId) || !uuid(attempt.recordId) || attempt.created !== value.created || attempt.path !== value.path || !value.targetCollectionId)) return false;
   if (value.recordId !== null && (!uuid(value.recordId) || (object(attempt) && value.recordId !== attempt.recordId))) return false;
   return value.savedBody === null || value.recordId !== null;
+}
+export class DraftConflictError extends Error {
+  constructor() {super("This note changed in another tab. Your text is still here. Copy your text before reloading the saved version.");}
 }
 export class DraftPersistenceError extends Error {
   constructor() {super("Keep this page open: Journal cannot preserve its text on this device.");}
@@ -52,7 +63,21 @@ export interface JournalPreferences {
 }
 export class JournalDrafts {
   private readonly pins = new Map<string, number>();
-  constructor(private readonly storage: DraftStorage, private readonly limits = {maxBytes: 3 * 1024 * 1024, maxDrafts: 256}) {}
+  private locked = false;
+  constructor(private readonly storage: DraftStorage, private readonly limits = {maxBytes: 3 * 1024 * 1024, maxDrafts: 256}, private readonly lock?: DraftLock) {}
+  /** All browser mutations share one origin lock, including metadata and pruning.
+   * Operations are synchronous: no network/SDK await holds the storage lock.
+   * Memory-storage tests do not need a browser lock. */
+  mutate<T>(operation: () => T): Promise<T> {
+    if (!this.lock || this.locked) {
+      try {return Promise.resolve(operation());} catch (error) {return Promise.reject(error);}
+    }
+    return this.lock(() => {
+      this.locked = true;
+      try {return operation();} finally {this.locked = false;}
+    });
+  }
+  private requireLock(): void {if (this.lock && !this.locked) throw new DraftPersistenceError();}
   pin(id: string): () => void {
     this.pins.set(id, (this.pins.get(id) ?? 0) + 1);
     let released = false;
@@ -76,6 +101,7 @@ export class JournalDrafts {
     return {folder: "journal", theme: "system"};
   }
   savePreferences(preferences: JournalPreferences): void {
+    this.requireLock();
     try {const bytes = JSON.stringify(preferences); this.bound("journal.prefs.v2", bytes); this.storage.setItem("journal.prefs.v2", bytes);
       if (this.storage.getItem("journal.prefs.v2") !== bytes) throw new DraftPersistenceError();} catch {throw new DraftPersistenceError();}
   }
@@ -85,18 +111,30 @@ export class JournalDrafts {
       if (!bytes) return null;
       const data: unknown = JSON.parse(bytes);
       if (!validDraft(data) || data.id !== id) return null;
-      return data;
+      return {...data, revision: draftRevision(data.body)};
     } catch {return null;}
   }
   put(draft: JournalDraft): JournalDraft {
+    this.requireLock();
     if (!validDraft(draft)) throw new DraftPersistenceError();
-    const bytes = JSON.stringify(draft);
+    const existing = this.get(draft.id);
+    if (existing && existing.revision !== draft.revision) throw new DraftConflictError();
+    const next = {...draft, revision: draftRevision(draft.body)};
+    const bytes = JSON.stringify(next);
     try {
       this.bound(prefix + draft.id, bytes);
       this.storage.setItem(prefix + draft.id, bytes);
       if (this.storage.getItem(prefix + draft.id) !== bytes) throw new DraftPersistenceError();
     } catch {throw new DraftPersistenceError();}
-    return draft;
+    return next;
+  }
+  /** Change only text against the displayed base. Retain newer save metadata,
+   * original creation identities and destination, never stale UI metadata. */
+  updateBody(base: JournalDraft, body: string, path: string | null): JournalDraft {
+    this.requireLock();
+    const existing = this.get(base.id);
+    if (existing && (existing.revision !== base.revision || existing.targetCollectionId !== base.targetCollectionId)) throw new DraftConflictError();
+    return this.put({...existing ?? base, body, path: existing?.path ?? path, touchedMs: Date.now()});
   }
   private canPrune(draft: JournalDraft, now: number): boolean {
     return !this.pins.has(draft.id) && draft.finished && !!draft.recordId && !draft.legacyKey &&
@@ -105,6 +143,7 @@ export class JournalDrafts {
   /** Reclaim old confirmed copies on a new visit, before hitting a quota.
    * Unresolved writing and borrowed leases stay protected by the same rule. */
   pruneConfirmed(now = Date.now()): number {
+    this.requireLock();
     let removed = 0;
     for (const draft of this.list()) {
       const key = prefix + draft.id, bytes = this.storage.getItem(key), current = this.get(draft.id);
@@ -166,6 +205,7 @@ export class JournalDrafts {
   /** Import pending prototype writing once per source key. Original bytes and
    * destination survive; missing native identities never become new writes. */
   importLegacy(): void {
+    this.requireLock();
     const imported = new Set(this.list().flatMap(draft => draft.legacyKey ? [draft.legacyKey] : []));
     const keys: string[] = [];
     for (let i = 0; i < this.storage.length; i++) {const key = this.storage.key(i); if (key?.startsWith("journal.note.")) keys.push(key);}

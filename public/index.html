@@ -31,6 +31,11 @@
 </header>
 <main>
   <textarea id="page" aria-label="Note" spellcheck="true" autocapitalize="sentences"></textarea>
+  <section id="draft-conflict" hidden aria-label="Conflicting note" aria-live="polite">
+    <p>This note changed elsewhere. Copy your text before using the saved version.</p>
+    <button id="copy-conflicting-text" type="button">Copy my text</button>
+    <button id="use-saved-version" type="button">Use saved version</button>
+  </section>
 </main>
 <footer>
   <button class="status" id="status-button" aria-live="polite" aria-label="Journal settings"><i class="dot" id="dot"></i><span id="status"></span></button>

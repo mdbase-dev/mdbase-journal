@@ -46,8 +46,9 @@ export class JournalData {
   }
   subscribe(listener: () => void): () => void {this.listeners.add(listener); return () => this.listeners.delete(listener);}
   private notify(): void {for (const listener of this.listeners) listener();}
-  private ensure(draft?: JournalDraft): void {
+  private ensure(draft?: JournalDraft, reviewing = false): void {
     this.caller.signal.throwIfAborted();
+    if (draft?.reviewRequired && !reviewing) throw new Error("This note changed elsewhere. Copy your text or use the saved version before continuing.");
     if (draft?.legacyKey) throw new Error("This earlier note needs its original save reviewed. Your text is still on this device.");
     if (this.disposed || !this.connection.isCurrent()) throw new Error("This collection has changed. Your text is still on this device.");
     if (draft?.targetCollectionId && draft.targetCollectionId !== this.connection.id) throw new Error("This note belongs to another collection.");
@@ -81,8 +82,8 @@ export class JournalData {
     if (local) return local;
     const record = await this.connection.records.get(entry.id, {body: true, document: true}, this.caller.signal);
     this.ensure(); currentRecord(record, entry.id);
-    const draft = this.drafts.put({...this.drafts.blank(this.connection.id, new Date(entry.createdMs)), id: entry.id,
-      created: entry.created, body: record.body!, savedBody: record.body!, path: record.path, recordId: record.id});
+    const draft = await this.drafts.mutate(() => this.drafts.put({...this.drafts.blank(this.connection.id, new Date(entry.createdMs)), id: entry.id,
+      created: entry.created, body: record.body!, savedBody: record.body!, path: record.path, recordId: record.id}));
     await this.open(draft.id);
     this.ensure();
     return this.drafts.get(draft.id)!;
@@ -108,23 +109,24 @@ export class JournalData {
     let draft = this.drafts.get(id);
     if (!draft || !draft.path || (!draft.recordId && !draft.body.trim())) throw new Error("Write something before saving this page.");
     this.ensure(draft);
-    if (!draft.targetCollectionId) draft = this.drafts.patch(id, {targetCollectionId: this.connection.id});
+    if (!draft.targetCollectionId) draft = await this.drafts.mutate(() => this.drafts.patch(id, {targetCollectionId: this.connection.id}));
     if (!draft.recordId) {
       if (!draft.createAttempt) {
         if (!type) throw new Error("Choose an entry type before creating a page.");
         const path = draft.path;
         if (!path) throw new Error("The original note path is missing.");
         // Persist both original identities and exact intent BEFORE any capture.
-        draft = this.drafts.patch(id, {createAttempt: {mutationId: uuidv7(), recordId: uuidv7(), body: draft.body,
-          typeName: type.name, createdField: type.createdField, path, created: draft.created,
-          account: this.connection.scope.account, installation: this.connection.scope.installation}});
+        const original = draft;
+        draft = await this.drafts.mutate(() => this.drafts.patch(id, {createAttempt: {mutationId: uuidv7(), recordId: uuidv7(), body: original.body,
+          typeName: type.name, createdField: type.createdField, path, created: original.created,
+          account: this.connection.scope.account, installation: this.connection.scope.installation}}));
         const attempt = draft.createAttempt!;
         const result = await this.connection.records.save(this.connection.records.create({id: attempt.recordId, path: attempt.path, type: attempt.typeName,
           frontmatter: {[attempt.createdField]: attempt.created}, body: attempt.body}, {mutationId: attempt.mutationId, signal: this.caller.signal}), {signal: this.caller.signal});
         this.ensure(draft);
         // A refusal is definite: nothing was created, so the next save starts a new intent.
         if (result.outcome === "rejected") {
-          this.drafts.patch(id, {createAttempt: null});
+          await this.drafts.mutate(() => this.drafts.patch(id, {createAttempt: null}));
           throw new Error(result.problem?.message ?? "mdbase refused this note. Your text is still on this device.");
         }
       }
@@ -135,7 +137,7 @@ export class JournalData {
         .catch(() => {throw new Error("Keep this page open while its original save is unresolved.");});
       this.ensure(draft); currentRecord(record, attempt.recordId);
       if (record.body !== attempt.body) throw new Error("The original saved note has changed. Your local text has been preserved.");
-      draft = this.drafts.patch(id, {recordId: attempt.recordId, savedBody: record.state.state === "confirmed" ? attempt.body : null});
+      draft = await this.drafts.mutate(() => this.drafts.patch(id, {recordId: attempt.recordId, savedBody: record.state.state === "confirmed" ? attempt.body : null}));
     }
     // An unconfirmed write from an earlier visit is in the SDK write ledger; the record stays editable.
     const lease = await this.connection.records.records.open(draft.recordId!, {signal: this.caller.signal, autosave: {idleMs: 1200}});
@@ -145,10 +147,16 @@ export class JournalData {
       if (snapshot.state === "saved" && snapshot.body !== draft.savedBody && draft.body !== snapshot.body) throw new Error("This note changed elsewhere. Your local text has been preserved.");
       const unsubscribe = lease.session.subscribe(() => {
         if (this.disposed || !this.connection.isCurrent() || this.problems.has(id)) return;
-        try {
-          const value = lease.session.getSnapshot();
-          if (value.state === "saved" && !value.dirty) this.drafts.patch(id, {savedBody: value.body});
-        } catch {this.problems.set(id, "Keep this page open: Journal cannot preserve the original save outcome on this device.");}
+        const value = lease.session.getSnapshot();
+        if (value.state === "saved" && !value.dirty) {
+          void this.drafts.mutate(() => {
+            const local = this.drafts.get(id);
+            if (!local) throw new Error("The original local draft is missing.");
+            // Clean text follows its SDK source; unsent writing stays put.
+            this.drafts.patch(id, local.body === local.savedBody ? {body: value.body, savedBody: value.body} : {savedBody: value.body});
+          }).catch(() => {this.problems.set(id, "Keep this page open: Journal cannot preserve the original save outcome on this device.");})
+            .finally(() => this.notify());
+        }
         this.notify();
       });
       this.unsubscriptions.set(id, unsubscribe);
@@ -164,11 +172,36 @@ export class JournalData {
       lease.release(); throw error;
     }
   }
-  setBody(id: string, body: string): void {
-    const draft = this.drafts.patch(id, {body, touchedMs: Date.now()});
-    this.ensure(draft);
-    if (this.problems.has(id)) throw new Error(this.problems.get(id));
-    this.leases.get(id)?.session.setBody(body);
+  setBody(id: string, body: string, source?: {body: string; revision: string | null}): Promise<void> {
+    return this.drafts.mutate(() => {
+      const draft = this.drafts.patch(id, {body, touchedMs: Date.now()});
+      this.ensure(draft);
+      if (this.problems.has(id)) throw new Error(this.problems.get(id));
+      const session = this.leases.get(id)?.session;
+      const actual = session?.getSnapshot();
+      // Never attach stale displayed text to a freshly advanced SDK revision.
+      if (source && actual && actual.body !== body && (actual.body !== source.body || !actual.dirty && source.revision !== null && actual.record.revision !== source.revision)) {
+        this.drafts.patch(id, {reviewRequired: true});
+        throw new Error("This note changed elsewhere. Your local text has been preserved.");
+      }
+      session?.setBody(body);
+    });
+  }
+  /** Explicit user choice: read the original confirmed source, never write or
+   * recreate it. Concurrent further typing refuses the discard. */
+  async useSavedVersion(id: string): Promise<JournalDraft> {
+    const original = this.drafts.get(id);
+    if (!original?.recordId) throw new Error("The original saved note is not available yet. Keep your text here.");
+    this.ensure(original, true);
+    const record = await this.connection.records.get(original.recordId, {body: true, document: true}, this.caller.signal);
+    this.ensure(original, true); currentRecord(record, original.recordId);
+    return this.drafts.mutate(() => {
+      const latest = this.drafts.get(id);
+      if (!latest || latest.revision !== original.revision) throw new Error("Your text changed while the saved version was opening. Copy it before trying again.");
+      const session = this.leases.get(id)?.session;
+      if (session?.getSnapshot().state === "conflict") session.resolve({keep: "theirs"});
+      return this.drafts.patch(id, {body: record.body!, savedBody: record.body!, reviewRequired: false});
+    });
   }
   problem(id: string): string | null {return this.problems.get(id) ?? null;}
   snapshot(id: string): RecordSessionSnapshot | null {return this.leases.get(id)?.session.getSnapshot() ?? null;}

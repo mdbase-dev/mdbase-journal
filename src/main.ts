@@ -1,5 +1,5 @@
 import {createJournalApplication, type JournalApplicationInputs} from "./application.js";
-import {JournalDrafts} from "./drafts.js";
+import {DraftPersistenceError, JournalDrafts} from "./drafts.js";
 import {mountJournal} from "./view.js";
 import {mountReturningNotice} from "./returning-notice.js";
 import {completeAppGrantCallback} from "./grant-callback.js";
@@ -13,7 +13,9 @@ if (!completeAppGrantCallback(new URL(location.href), {document, load: () => imp
   // Access storage inside operations: browser privacy policy can throw even from
   // the localStorage getter. No in-memory storage substitute authorizes a save.
   const drafts = new JournalDrafts({getItem: key => localStorage.getItem(key), setItem: (key, value) => localStorage.setItem(key, value),
-    removeItem: key => localStorage.removeItem(key), key: index => localStorage.key(index), get length() {return localStorage.length;}});
-  const view = mountJournal(document, drafts, entry);
+    removeItem: key => localStorage.removeItem(key), key: index => localStorage.key(index), get length() {return localStorage.length;}}, undefined,
+    operation => navigator.locks ? navigator.locks.request("journal.native.drafts", operation) : Promise.reject(new DraftPersistenceError()));
+  // Initialization changes metadata and prunes copies under the same lock.
+  const view = await drafts.mutate(() => mountJournal(document, drafts, entry)).catch(() => mountJournal(document, drafts, entry));
   addEventListener("pagehide", () => view.dispose(), {once: true});
 }

@@ -119,6 +119,41 @@ test("same collection under another account or installation cannot acquire an or
     } finally {get.mock.restore(); create.mock.restore(); other.release();}
   } finally {original.release(); h.close();}
 });
+test("stale displayed native text cannot use a fresh SDK revision, including after reload", async () => {
+  const h = await applicationFixture(), drafts = new JournalDrafts(memoryStorage());
+  const draft = drafts.put({...drafts.blank(h.connection.id), body: "Seed", path: "native-concurrency.md"});
+  const data = new JournalData(h.connection, drafts);
+  try {
+    const lease = await data.open(draft.id, journalEntryTypes(catalog())[0]!);
+    const shown = lease.session.getSnapshot();
+    lease.session.setBody("Seed\nOther tab"); await lease.session.flush();
+    const update = mock.method(h.records, "update");
+    try {
+      await assert.rejects(data.setBody(draft.id, "Seed\nStale typing", {body: shown.body, revision: shown.record.revision}), /changed elsewhere/);
+      assert.equal(drafts.get(draft.id)?.body, "Seed\nStale typing");
+      assert.equal(drafts.get(draft.id)?.reviewRequired, true);
+      await assert.rejects(data.flush(draft.id), /changed elsewhere/);
+      const reloaded = new JournalData(h.connection, drafts);
+      try {await assert.rejects(reloaded.open(draft.id), /changed elsewhere/);} finally {reloaded.release();}
+      assert.equal(update.mock.callCount(), 0);
+      assert.equal((await h.records.get(drafts.get(draft.id)!.recordId!, {body: true})).body, "Seed\nOther tab");
+      const selected = await data.useSavedVersion(draft.id);
+      assert.equal(selected.body, "Seed\nOther tab"); assert.equal(selected.reviewRequired, false);
+      assert.equal(update.mock.callCount(), 0, "using the saved version is read-only");
+    } finally {update.mock.restore();}
+  } finally {data.release(); h.close();}
+});
+test("clean native SDK source updates reconcile text as well as its saved baseline", async () => {
+  const h = await applicationFixture(), drafts = new JournalDrafts(memoryStorage());
+  const draft = drafts.put({...drafts.blank(h.connection.id), body: "Seed", path: "native-clean-update.md"});
+  const data = new JournalData(h.connection, drafts);
+  try {
+    const lease = await data.open(draft.id, journalEntryTypes(catalog())[0]!);
+    lease.session.setBody("Seed\nCurrent source"); await lease.session.flush();
+    assert.equal(drafts.get(draft.id)?.body, "Seed\nCurrent source");
+    assert.equal(drafts.get(draft.id)?.savedBody, "Seed\nCurrent source");
+  } finally {data.release(); h.close();}
+});
 test("files use the same public FilesApi and real SDK protocol", async () => {
   const h = await applicationFixture(), data = new JournalData(h.connection, new JournalDrafts(memoryStorage()));
   try {

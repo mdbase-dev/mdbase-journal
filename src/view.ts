@@ -1,7 +1,7 @@
 import {describeError, type Mdbase, type MdbaseErrorDescription, type MdbaseSnapshot} from "@mdbase-dev/sdk";
 import {mountCollectionUi, type MountedCollectionUi} from "@mdbase-dev/ui/collections";
 import {journalConnection} from "./application.js";
-import {DraftPersistenceError, JournalDrafts, notePath, type JournalDraft} from "./drafts.js";
+import {DraftConflictError, DraftPersistenceError, draftRevision, JournalDrafts, notePath, type JournalDraft} from "./drafts.js";
 import {JournalData, type JournalEntry, type JournalEntryType} from "./journal-data.js";
 import {DraftOpens} from "./draft-opens.js";
 import {connectionNotice, connectionNoticeLabels} from "./connection-notice.js";
@@ -37,6 +37,10 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   let undoTimer: ReturnType<typeof setTimeout> | null = null;
   let memoryOnly = false;
   let unpersistedDraft = true;
+  let pendingInputs = 0;
+  let inputEpoch = 0;
+  let displayedRecordRevision: string | null = null;
+  let conflicted = false;
   const retrying = new Set<string>();
   const preferences = drafts.preferences();
   let folder = preferences.folder;
@@ -79,8 +83,15 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     button.textContent = retrying.has(id) ? "Retrying…" : "Retry saving";
     button.disabled = retrying.has(id);
   }
+  function transaction(operation: () => void): void {
+    void drafts.mutate(operation).catch(() => {problem = "Keep this page open: Journal cannot preserve its text on this device."; render();});
+  }
   function clearUndo(): void {undoId = null; if (undoTimer !== null) clearTimeout(undoTimer); undoTimer = null;}
+  let renderedDraftId = current.id;
   function renderPage(): void {
+    if (renderedDraftId !== current.id) conflicted = false;
+    renderedDraftId = current.id;
+    displayedRecordRevision = data?.snapshot(current.id)?.record.revision ?? null;
     page.value = current.body;
     page.style.height = "auto";
     page.style.height = `${Math.max(240, page.scrollHeight)}px`;
@@ -89,7 +100,23 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   }
   function render(): void {
     if (disposed) return;
-    if (!memoryOnly) current = drafts.get(current.id) ?? current;
+    if (!memoryOnly && !pendingInputs) {
+      const latest = drafts.get(current.id);
+      if (latest) {
+        const changedBody = latest.body !== current.body;
+        current = latest;
+        if (changedBody) {
+          const start = page.selectionStart, end = page.selectionEnd, atEnd = start === end && end === page.value.length;
+          renderPage();
+          page.setSelectionRange(atEnd ? page.value.length : Math.min(start, page.value.length), atEnd ? page.value.length : Math.min(end, page.value.length));
+        }
+      }
+    }
+    const observed = data?.snapshot(current.id);
+    if (observed && observed.body === page.value) displayedRecordRevision = observed.record.revision;
+    conflicted = conflicted || current.reviewRequired === true || observed?.state === "conflict";
+    element("draft-conflict").hidden = !conflicted;
+    element<HTMLButtonElement>("use-saved-version").disabled = current.reviewRequired === true && !data;
     if (entriesDialog.open) renderEntries();
     document.body.classList.toggle("typing", !!current.body.trim());
     const state = snapshot();
@@ -172,7 +199,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     element("word-count").textContent = `${words} word${words === 1 ? "" : "s"}`;
     element("word-count").hidden = words === 0;
   }
-  function newPage(): void {
+  function newPage(): void {transaction(() => {
     if (!current.body.trim()) {page.focus(); return;}
     if (memoryOnly) {problem = "Keep this page open: its text has not been preserved on this device."; render(); return;}
     const previous = current;
@@ -184,15 +211,15 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       undoTimer = setTimeout(() => {clearUndo(); render();}, 8000);
       problem = null; renderPage(); render(); page.focus();
     } catch {current = previous; problem = "Keep this page open: Journal cannot preserve its text on this device."; render();}
-  }
-  function undoNewPage(): void {
+  });}
+  function undoNewPage(): void {transaction(() => {
     if (!undoId || current.body.trim()) return;
     const previous = drafts.get(undoId);
     if (!previous || previous.targetCollectionId !== snapshot()?.selectedCollectionId && snapshot()?.selectedCollectionId !== undefined) {clearUndo(); render(); return;}
     try {current = drafts.patch(previous.id, {finished: false}); unpersistedDraft = false; clearUndo(); renderPage(); render(); page.focus();}
     catch {problem = "Keep this page open: Journal cannot restore the previous draft safely."; render();}
-  }
-  function restoreDraft(id: string): void {
+  });}
+  function restoreDraft(id: string): void {transaction(() => {
     if (disposed || memoryOnly) return;
     try {
       const earlier = drafts.get(id);
@@ -201,7 +228,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       current = drafts.patch(id, {finished: false, touchedMs: Date.now()}); unpersistedDraft = false;
       clearUndo(); problem = null; renderPage(); render(); page.focus();
     } catch {problem = "Keep this page open: Journal cannot restore the earlier text safely."; render();}
-  }
+  });}
   function visibleEntries(): {entry: JournalEntry; draft: JournalDraft | null}[] {
     const collection = snapshot()?.selectedCollectionId ?? current.targetCollectionId;
     const local = drafts.list().filter(draft => draft.targetCollectionId === collection && draft.body.trim());
@@ -247,7 +274,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       if (!disposed && data === owned) entriesProblem = "Saved entries could not be loaded. Notes on this device are still available.";
     }).finally(() => {if (!disposed && data === owned) {entriesLoading = false; renderEntries();}});
   }
-  function startOnDate(date: Date): void {
+  function startOnDate(date: Date): void {transaction(() => {
     if (memoryOnly || !Number.isFinite(date.getTime())) return;
     try {
       const next = drafts.blank(snapshot()?.selectedCollectionId ?? null, date);
@@ -255,7 +282,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       current = next; unpersistedDraft = true;
       clearUndo(); problem = null; renderPage(); render(); page.focus();
     } catch {problem = "Keep this page open: Journal cannot preserve its text on this device."; render();}
-  }
+  });}
   let navigatingDay = false;
   async function adjacentDay(offset: number): Promise<void> {
     if (navigatingDay || memoryOnly) return;
@@ -348,20 +375,25 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   }
   listen(page, "input", () => {
     clearUndo();
-    const body = page.value;
-    try {
-      const durable = drafts.get(current.id);
-      if (!durable && !unpersistedDraft) throw new DraftPersistenceError();
-      const original = durable ?? current;
-      current = drafts.put({...original, body, touchedMs: Date.now(), path: original.path ?? (body.trim() ? notePath(new Date(current.createdMs), folder, current.id) : null)});
-      memoryOnly = false; unpersistedDraft = false; problem = null;
-      if (data?.snapshot(current.id)) data.setBody(current.id, body);
-      else void save();
-    } catch (error) {
-      current = {...current, body};
-      if (error instanceof DraftPersistenceError) {memoryOnly = true; problem = error.message;}
-      else problem = "Your text is on this device. Its original save has not completed.";
-    }
+    const body = page.value, base = current, wasUnpersisted = unpersistedDraft, owned = data;
+    const source = {body: base.body, revision: displayedRecordRevision}, epoch = ++inputEpoch;
+    current = {...base, body, revision: draftRevision(body)};
+    pendingInputs++;
+    void drafts.mutate(() => {
+      if (!drafts.get(base.id) && !wasUnpersisted) throw new DraftPersistenceError();
+      const value = drafts.updateBody(base, body, base.path ?? (body.trim() ? notePath(new Date(base.createdMs), folder, base.id) : null));
+      if (current.id === base.id && epoch === inputEpoch) {current = value; memoryOnly = false; unpersistedDraft = false; problem = null;}
+      if (owned === data && owned?.snapshot(base.id)) {
+        void owned.setBody(base.id, body, source).catch(error => {
+          if (current.id === base.id) {conflicted = true; problem = error instanceof Error ? error.message : "Your original save needs review."; render();}
+        });
+      } else void save();
+    }).catch(error => {
+      if (current.id !== base.id || epoch !== inputEpoch) return;
+      memoryOnly = true;
+      conflicted = error instanceof DraftConflictError;
+      problem = error instanceof Error ? error.message : "Keep this page open: Journal cannot preserve its text on this device.";
+    }).finally(() => {pendingInputs--; render();});
     page.style.height = "auto"; page.style.height = `${Math.max(240, page.scrollHeight)}px`;
     document.body.classList.toggle("quiet", !!body.trim()); render();
   });
@@ -374,7 +406,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   listen(element("close-menu"), "click", () => menu.close());
   listen(menu, "close", () => {
     const candidate = element<HTMLInputElement>("folder").value.trim() || "journal";
-    try {notePath(new Date(), candidate); drafts.savePreferences({...preferences, folder: candidate}); folder = candidate;}
+    try {notePath(new Date(), candidate); transaction(() => {drafts.savePreferences({...preferences, folder: candidate}); folder = candidate;});}
     catch {problem = "Choose a folder within this collection that Journal can preserve on this device."; render();}
     page.focus();
   });
@@ -382,7 +414,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     type = types.find(item => item.name === typeChoice.value) ?? null;
     if (data && type) {
       preferences.entryTypes = Object.fromEntries(Object.entries({...preferences.entryTypes, [data.connection.id]: type.name}).slice(-64));
-      try {drafts.savePreferences({...preferences, folder});} catch {problem = "Journal could not preserve your entry type preference on this device.";}
+      try {transaction(() => drafts.savePreferences({...preferences, folder}));} catch {problem = "Journal could not preserve your entry type preference on this device.";}
     }
     save();
   });
@@ -395,13 +427,45 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   for (const button of document.querySelectorAll<HTMLElement>("[data-theme-choice]")) listen(button, "click", () => {
     const theme = button.dataset.themeChoice;
     preferences.theme = theme === "light" || theme === "dark" ? theme : "system";
-    try {drafts.savePreferences({...preferences, folder});} catch {problem = "Journal could not preserve your theme preference.";}
+    try {transaction(() => drafts.savePreferences({...preferences, folder}));} catch {problem = "Journal could not preserve your theme preference.";}
     applyTheme(); render();
   });
   for (const name of ["pointermove", "wheel", "touchmove", "focusin"]) listen(document, name, () => document.body.classList.remove("quiet"));
   applyTheme();
-  const unlistenApp = mdbase?.subscribe(changed) ?? (() => {});
+  const unlistenApp = mdbase?.subscribe(() => transaction(changed)) ?? (() => {});
   if (document.defaultView) for (const name of ["online", "offline"]) listen(document.defaultView, name, render);
+  listen(element("copy-conflicting-text"), "click", () => {
+    const clipboard = document.defaultView?.navigator.clipboard;
+    if (!clipboard) {page.focus(); page.select(); problem = "Your text is selected. Copy it before using the saved version."; render(); return;}
+    void clipboard.writeText(page.value).then(() => {problem = "Text copied. You can now use the saved version."; render();}, () => {page.focus(); page.select(); problem = "Copy your selected text before using the saved version."; render();});
+  });
+  listen(element("use-saved-version"), "click", () => {
+    const id = current.id, chosenEpoch = inputEpoch;
+    const choose = (current.reviewRequired || data?.snapshot(id)?.state === "conflict") && data ? data.useSavedVersion(id) : drafts.mutate(() => drafts.get(id));
+    void choose.then(value => {
+      if (disposed || current.id !== id || inputEpoch !== chosenEpoch || !value) return;
+      current = value; memoryOnly = false; conflicted = false; problem = null;
+      renderPage(); render();
+    }, error => {problem = error instanceof Error ? error.message : "The saved version could not be opened. Keep your text here."; render();});
+  });
+  if (document.defaultView) {
+    listen(document.defaultView, "storage", event => {
+      const key = (event as StorageEvent).key;
+      if (key !== null && key !== `journal.native.note.${current.id}`) return;
+      const before = current, owned = data, source = {body: current.body, revision: displayedRecordRevision};
+      render();
+      // Another tab's durable local edit can use this same original lease.
+      // The displayed-source guard still refuses a changed native baseline.
+      if (!memoryOnly && !pendingInputs && owned === data && before.id === current.id && before.body !== current.body && owned?.snapshot(current.id)) {
+        void owned.setBody(current.id, current.body, source).catch(error => {
+          conflicted = true; problem = error instanceof Error ? error.message : "Your original save needs review."; render();
+        });
+      }
+    });
+    listen(document.defaultView, "beforeunload", event => {
+      if (memoryOnly || pendingInputs || current.reviewRequired) {event.preventDefault(); (event as BeforeUnloadEvent).returnValue = "";}
+    });
+  }
   // The shared panel starts the SDK; failures are on the snapshot, shown with their fix.
   renderPage(); changed(); render();
   return {currentDraft: () => current, newPage, undoNewPage, dispose() {
