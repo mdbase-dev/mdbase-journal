@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Journal</title>
-<meta name="description" content="A blank page every time you open it. Each note becomes a Markdown record in your mdbase collection.">
+<meta name="description" content="A quiet page for writing and revisiting your journal. Each note is ordinary Markdown in your mdbase collection.">
 <meta name="theme-color" content="#f7f5f0" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#161513" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -19,7 +19,14 @@
 </head>
 <body>
 <header>
-  <div class="context"><span id="when"></span><span id="collection-switcher" hidden></span></div>
+  <div class="context">
+    <nav aria-label="Journal dates">
+      <button id="previous-day" aria-label="Previous day">‹</button>
+      <button id="browse-button" aria-haspopup="dialog" aria-controls="entries"><span id="when"></span></button>
+      <button id="next-day" aria-label="Next day">›</button>
+    </nav>
+    <span id="collection-switcher" hidden></span>
+  </div>
   <button id="menu-button" aria-haspopup="dialog" aria-controls="menu" aria-label="Journal settings">•••</button>
 </header>
 <main>
@@ -63,10 +70,19 @@
       <span id="pending-count"></span>
       <div id="pending-details"></div>
     </div>
-    <p>To read old notes, open the collection in Editor or any other app.</p>
+    <p>Use the date at the top of the page to browse earlier entries.</p>
     <div class="actions">
       <button id="close-menu">Done</button>
     </div>
+  </div>
+</dialog>
+<dialog id="entries" aria-labelledby="entries-title">
+  <div class="sheet">
+    <h2 id="entries-title">Journal entries</h2>
+    <div class="row"><label for="entry-date">Date</label><input id="entry-date" type="date"></div>
+    <p id="entries-status" role="status"></p>
+    <div id="entry-list"></div>
+    <div class="actions"><button id="write-date">Write on this date</button><button id="close-entries">Done</button></div>
   </div>
 </dialog>
 <script type="module" src="/journal.js"></script>

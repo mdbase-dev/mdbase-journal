@@ -2,6 +2,7 @@ import {revisionOf, uuidv7, type MdbaseApplicationConnection, type RecordLease, 
 import {JournalDrafts, type JournalDraft} from "./drafts.js";
 export const JOURNAL_CONTRACT = Object.freeze({id: "journal.entry", version: "0.1.0", digest: "sha256:7e95bdf03621919fb0e722e5a29b48a68d7a4eaa3a94aea033d96ea2f7ec34cc"});
 export interface JournalEntryType {readonly name: string; readonly createdField: string}
+export interface JournalEntry {readonly id: string; readonly created: string; readonly createdMs: number; readonly path: string}
 /** Only current canonical catalog bindings, never the starter type name. */
 export function journalEntryTypes(catalog: wire.DescribeResult): JournalEntryType[] {
   const contract = catalog.contracts.filter(c => c.id === JOURNAL_CONTRACT.id && c.version === JOURNAL_CONTRACT.version && c.digest === JOURNAL_CONTRACT.digest);
@@ -59,7 +60,34 @@ export class JournalData {
     this.ensure();
     return journalEntryTypes(catalog);
   }
-  async open(id: string, type: JournalEntryType): Promise<RecordLease> {
+  async entries(types: JournalEntryType[]): Promise<JournalEntry[]> {
+    this.ensure();
+    const entries: JournalEntry[] = [];
+    for await (const page of this.connection.records.pages({types: types.map(type => type.name)}, {}, this.caller.signal)) {
+      this.ensure();
+      for (const record of page.records) {
+        const type = types.find(type => record.types.includes(type.name));
+        const created = type ? record.frontmatter.get(type.createdField) : null;
+        if (typeof created !== "string" || !Number.isFinite(Date.parse(created))) continue;
+        entries.push({id: record.id, created, createdMs: Date.parse(created), path: record.path});
+      }
+    }
+    return entries.sort((a, b) => b.createdMs - a.createdMs);
+  }
+  /** Read an existing entry, never re-create it or mint a capture identity. */
+  async resume(entry: JournalEntry): Promise<JournalDraft> {
+    this.ensure();
+    const local = this.drafts.list().find(draft => draft.targetCollectionId === this.connection.id && draft.recordId === entry.id);
+    if (local) return local;
+    const record = await this.connection.records.get(entry.id, {body: true, document: true}, this.caller.signal);
+    this.ensure(); currentRecord(record, entry.id);
+    const draft = this.drafts.put({...this.drafts.blank(this.connection.id, new Date(entry.createdMs)), id: entry.id,
+      created: entry.created, body: record.body!, savedBody: record.body!, path: record.path, recordId: record.id});
+    await this.open(draft.id);
+    this.ensure();
+    return this.drafts.get(draft.id)!;
+  }
+  async open(id: string, type?: JournalEntryType): Promise<RecordLease> {
     const draft = this.drafts.get(id);
     if (!draft) throw new Error("The original local draft is missing. Keep this page open.");
     this.ensure(draft);
@@ -76,13 +104,14 @@ export class JournalData {
       if (!this.leases.has(id)) {unpin(); if (this.unpins.get(id) === unpin) this.unpins.delete(id);}
     }
   }
-  private async acquire(id: string, type: JournalEntryType): Promise<RecordLease> {
+  private async acquire(id: string, type?: JournalEntryType): Promise<RecordLease> {
     let draft = this.drafts.get(id);
-    if (!draft || !draft.path || !draft.body.trim()) throw new Error("Write something before saving this page.");
+    if (!draft || !draft.path || (!draft.recordId && !draft.body.trim())) throw new Error("Write something before saving this page.");
     this.ensure(draft);
     if (!draft.targetCollectionId) draft = this.drafts.patch(id, {targetCollectionId: this.connection.id});
     if (!draft.recordId) {
       if (!draft.createAttempt) {
+        if (!type) throw new Error("Choose an entry type before creating a page.");
         const path = draft.path;
         if (!path) throw new Error("The original note path is missing.");
         // Persist both original identities and exact intent BEFORE any capture.

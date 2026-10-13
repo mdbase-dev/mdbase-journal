@@ -38,7 +38,7 @@ test("actual public singleton is lazy not_started in a controlled browser host, 
     h.window.close();
   }
 });
-test("unregistered local writing opens a blank page and never needs an SDK", () => {
+test("local writing reopens the same entry on reload and never needs an SDK", () => {
   const h = dom(), storage = memoryStorage(), drafts = new JournalDrafts(storage);
   const a = mountJournal(h.window.document, drafts, null);
   h.write("A private page"); assert.equal(a.currentDraft().body, "A private page");
@@ -47,7 +47,7 @@ test("unregistered local writing opens a blank page and never needs an SDK", () 
   assert.match(h.window.document.getElementById("status-button")!.getAttribute("aria-label")!, /^Journal settings\. On this device\. Sign-in is unavailable/);
   const id = a.currentDraft().id; a.dispose();
   const b = mountJournal(h.window.document, drafts, null);
-  assert.notEqual(b.currentDraft().id, id); assert.equal(h.page.value, ""); assert.equal(drafts.get(id)?.body, "A private page");
+  assert.equal(b.currentDraft().id, id); assert.equal(h.page.value, "A private page"); assert.equal(drafts.get(id)?.body, "A private page");
   b.dispose(); h.window.close();
 });
 test("first run imports prototype text quietly and reload never duplicates or overwrites resumed writing", () => {

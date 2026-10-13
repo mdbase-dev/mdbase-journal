@@ -2,7 +2,7 @@ import {describeError, type Mdbase, type MdbaseErrorDescription, type MdbaseSnap
 import {mountCollectionUi, type MountedCollectionUi} from "@mdbase-dev/ui/collections";
 import {journalConnection} from "./application.js";
 import {DraftPersistenceError, JournalDrafts, notePath, type JournalDraft} from "./drafts.js";
-import {JournalData, type JournalEntryType} from "./journal-data.js";
+import {JournalData, type JournalEntry, type JournalEntryType} from "./journal-data.js";
 import {DraftOpens} from "./draft-opens.js";
 import {connectionNotice, connectionNoticeLabels} from "./connection-notice.js";
 export interface JournalView {dispose(): void; currentDraft(): JournalDraft; newPage(): void; undoNewPage(): void}
@@ -43,6 +43,17 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   const segmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, {granularity: "word"}) : null;
   let observedCollectionId = mdbase?.getSnapshot().selectedCollectionId ?? null;
   let current = drafts.blank(observedCollectionId);
+  try {
+    const earlier = drafts.list().filter(draft => !draft.legacyKey && draft.body.trim() && (!observedCollectionId || draft.targetCollectionId === observedCollectionId))
+      .sort((a, b) => Number(a.finished) - Number(b.finished) || b.touchedMs - a.touchedMs)[0];
+    if (earlier) current = drafts.patch(earlier.id, {finished: false});
+    unpersistedDraft = !earlier;
+  } catch {problem = "Earlier notes could not be read on this device. Their text is still preserved.";}
+  const entriesDialog = element<HTMLDialogElement>("entries"), entryDate = element<HTMLInputElement>("entry-date");
+  let entries: JournalEntry[] = [];
+  let entriesProblem: string | null = null;
+  let entriesLoading = false;
+  const dateKey = (ms: number): string => {const date = new Date(ms); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;};
   try {drafts.pruneConfirmed();} catch {/* Best-effort cleanup never interrupts local writing. */}
   try {drafts.importLegacy();} catch {problem = "Earlier notes could not be copied on this device. Their original text is still preserved.";}
   const listen = (target: EventTarget, name: string, handler: EventListener) => target.addEventListener(name, handler, {signal: caller.signal});
@@ -79,6 +90,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   function render(): void {
     if (disposed) return;
     if (!memoryOnly) current = drafts.get(current.id) ?? current;
+    if (entriesDialog.open) renderEntries();
     document.body.classList.toggle("typing", !!current.body.trim());
     const state = snapshot();
     const phase = state?.phase ?? null;
@@ -186,10 +198,72 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       const earlier = drafts.get(id);
       if (!earlier) throw new DraftPersistenceError();
       if (current.body.trim()) drafts.patch(current.id, {finished: true, touchedMs: Date.now()});
-      current = drafts.patch(id, {finished: false}); unpersistedDraft = false;
+      current = drafts.patch(id, {finished: false, touchedMs: Date.now()}); unpersistedDraft = false;
       clearUndo(); problem = null; renderPage(); render(); page.focus();
     } catch {problem = "Keep this page open: Journal cannot restore the earlier text safely."; render();}
   }
+  function visibleEntries(): {entry: JournalEntry; draft: JournalDraft | null}[] {
+    const collection = snapshot()?.selectedCollectionId ?? current.targetCollectionId;
+    const local = drafts.list().filter(draft => draft.targetCollectionId === collection && draft.body.trim());
+    const rows = entries.filter(entry => !local.some(draft => draft.recordId === entry.id))
+      .map(entry => ({entry, draft: null as JournalDraft | null}));
+    rows.push(...local.map(draft => ({entry: {id: draft.id, created: draft.created, createdMs: draft.createdMs, path: draft.path ?? ""}, draft})));
+    return rows.sort((a, b) => b.entry.createdMs - a.entry.createdMs);
+  }
+  function renderEntries(): void {
+    let rows: ReturnType<typeof visibleEntries> = [];
+    try {rows = visibleEntries().filter(row => !entryDate.value || dateKey(row.entry.createdMs) === entryDate.value);}
+    catch {entriesProblem = "Earlier notes could not be read on this device.";}
+    element("entries-status").textContent = entriesProblem ?? (entriesLoading ? "Loading entries…" : rows.length ? "" : "No entries on this date. Start a page below.");
+    element("entry-list").replaceChildren(...rows.map(({entry, draft}) => {
+      const button = document.createElement("button"); button.type = "button";
+      const date = document.createElement("span"), summary = document.createElement("small");
+      date.textContent = new Date(entry.createdMs).toLocaleString(undefined, {weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit"});
+      summary.textContent = draft?.body.trim().split("\n")[0]?.slice(0, 100) ?? entry.path.split("/").pop() ?? "Journal entry";
+      button.append(date, summary); button.disabled = memoryOnly;
+      button.onclick = () => {
+        if (draft) {restoreDraft(draft.id); if (current.id === draft.id) entriesDialog.close(); return;}
+        const owned = data;
+        if (!owned || memoryOnly) return;
+        button.disabled = true;
+        void owned.resume(entry).then(value => {
+          if (disposed || data !== owned) return;
+          restoreDraft(value.id); if (current.id === value.id) entriesDialog.close();
+        }, () => {if (!disposed && data === owned) {entriesProblem = "This entry could not be opened. Your current page is unchanged."; renderEntries();}});
+      };
+      return button;
+    }));
+  }
+  function browse(date = ""): void {
+    entryDate.value = date; entriesProblem = null; renderEntries();
+    if (!entriesDialog.open) entriesDialog.showModal();
+    const owned = data;
+    if (!owned || !types.length) return;
+    entriesLoading = true; renderEntries();
+    void owned.entries(types).then(value => {if (!disposed && data === owned) entries = value;}, () => {
+      if (!disposed && data === owned) entriesProblem = "Saved entries could not be loaded. Notes on this device are still available.";
+    }).finally(() => {if (!disposed && data === owned) {entriesLoading = false; renderEntries();}});
+  }
+  function adjacentDay(offset: number): void {
+    const date = new Date(entryDate.value && entriesDialog.open ? `${entryDate.value}T12:00:00` : current.createdMs);
+    date.setDate(date.getDate() + offset); browse(dateKey(date.getTime()));
+  }
+  listen(element("browse-button"), "click", () => browse());
+  listen(element("previous-day"), "click", () => adjacentDay(-1));
+  listen(element("next-day"), "click", () => adjacentDay(1));
+  listen(entryDate, "input", renderEntries);
+  listen(element("close-entries"), "click", () => entriesDialog.close());
+  listen(entriesDialog, "close", () => page.focus());
+  listen(element("write-date"), "click", () => {
+    if (memoryOnly) return;
+    const date = entryDate.value ? new Date(`${entryDate.value}T12:00:00`) : new Date();
+    if (!Number.isFinite(date.getTime())) return;
+    try {
+      if (current.body.trim()) drafts.patch(current.id, {finished: true, touchedMs: Date.now()});
+      current = drafts.blank(snapshot()?.selectedCollectionId ?? null, date); unpersistedDraft = true;
+      clearUndo(); problem = null; renderPage(); render(); entriesDialog.close();
+    } catch {problem = "Keep this page open: Journal cannot preserve its text on this device."; render();}
+  });
   function save(): void {
     const owned = data, selectedType = type, queue = opens;
     if (!owned || !selectedType || !queue || disposed || memoryOnly) {render(); return;}
@@ -206,6 +280,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     const next = journalConnection(mdbase);
     if (next !== data?.connection) {
       unlistenData?.(); unlistenData = null; unlistenStatus?.(); unlistenStatus = null; opens?.dispose(); opens = null; data?.release(); data = null; types = []; type = null; actionProblem = null;
+      entries = []; entriesLoading = false;
       if (next) {
         const owned = new JournalData(next, drafts); data = owned;
         opens = new DraftOpens(owned, drafts, () => !disposed && data === owned && owned.connection.isCurrent(), render);

@@ -6,9 +6,10 @@ product
 
 ## Users and purpose
 
-People capturing a note on a blank page. Every visit starts a page; text remains
-ordinary Markdown in the selected collection. Local drafts preserve writing
-independently of connectivity.
+People capturing and revisiting journal entries on a quiet writing page. Reload
+reopens the current entry; date navigation and a compact entry sheet reach earlier
+pages without leaving Journal. Text remains ordinary Markdown in the selected
+collection. Local drafts preserve writing independently of connectivity.
 
 ## Brand
 
@@ -17,7 +18,7 @@ family identity; account controls support writing rather than competing with it.
 
 ## Anti-references
 
-No dashboard, note list or decorative authentication card system. No internal
+No dashboard, persistent note-list sidebar or decorative authentication card system. No internal
 identifiers or protocol terminology in ordinary sign-in messages.
 
 ## Principles

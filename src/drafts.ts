@@ -37,7 +37,7 @@ function validDraft(value: unknown): value is JournalDraft {
   const attempt = value.createAttempt;
   if (attempt !== null && (!object(attempt) || ["body", "typeName", "createdField", "path", "created", "account", "installation"].some(key => typeof attempt[key] !== "string") ||
       !uuid(attempt.mutationId) || !uuid(attempt.recordId) || attempt.created !== value.created || attempt.path !== value.path || !value.targetCollectionId)) return false;
-  if (value.recordId !== null && (!object(attempt) || value.recordId !== attempt.recordId)) return false;
+  if (value.recordId !== null && (!uuid(value.recordId) || (object(attempt) && value.recordId !== attempt.recordId))) return false;
   return value.savedBody === null || value.recordId !== null;
 }
 export class DraftPersistenceError extends Error {

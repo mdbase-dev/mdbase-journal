@@ -10,9 +10,9 @@ test("every shipped Journal dialog grid has zero-minimum tracks instead of intri
   try {
     const style = window.document.createElement("style"); style.textContent = css; window.document.head.append(style);
     const dialogs = [...window.document.querySelectorAll("dialog")];
-    assert.equal(dialogs.length, 1, "all shipped dialogs are inspected; prototype setup dialogs are not shipped");
-    const grids = [...dialogs[0]!.querySelectorAll(".sheet, .row, #pending-details")];
-    assert(grids.length >= 7);
+    assert.deepEqual(dialogs.map(dialog => dialog.id), ["menu", "entries"], "all shipped dialogs are inspected; prototype setup dialogs are not shipped");
+    const grids = dialogs.flatMap(dialog => [...dialog.querySelectorAll(".sheet, .row, #pending-details")]);
+    assert(grids.length >= 9);
     for (const grid of grids) {
       const computed = window.getComputedStyle(grid);
       assert.equal(computed.display, grid.hasAttribute("hidden") ? "none" : "grid");
