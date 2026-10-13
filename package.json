@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@mdbase-dev/connect-protocol": "file:vendor/mdbase-dev-connect-protocol-0.1.0-beta.129-c280cd194ffd.tgz",
-    "@mdbase-dev/sdk": "file:vendor/mdbase-dev-sdk-608bb0d5.tgz",
+    "@mdbase-dev/sdk": "file:vendor/mdbase-dev-sdk-a8fdbdce.tgz",
     "@mdbase-dev/ui": "file:vendor/ui-dev-7ff0ce02.tgz",
     "react": "19.2.8",
     "react-dom": "19.2.8"

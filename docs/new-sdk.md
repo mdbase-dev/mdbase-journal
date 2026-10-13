@@ -2,9 +2,9 @@
 
 Journal consumes the immutable SDK4c dev packet through ordinary local file dependencies. This is development intake, not release/runtime qualification.
 
-- SDK source: `608bb0d5f2be26932c381a2cf6f18bca4e1f29ea`.
-- Original SDK: 4,214,008 bytes, SHA-256 `c27e97fac641c14ea38acf9f2e38143fb63199b9cf2c811a5337d92abddb8853`.
-- Original SDK SRI and independent active protocol pin: `vendor/mdbase-sdk-dev-608bb0d5.json`. The active protocol is the original `c280cd194ffd` packet (107,322 bytes), not the retained older protocol archives.
+- SDK source: `a8fdbdcea712546bfdebe80b88975d4f70e19b95`.
+- Original SDK: 4,275,113 bytes, SHA-256 `c07d8255ebba0ba4eb985621261549ca8368829d3e780a88ed63dfdfd1602ae1`.
+- Original SDK SRI and independent active protocol pin: `vendor/mdbase-sdk-dev-a8fdbdce.json`. The active protocol is the original `c280cd194ffd` packet (107,322 bytes), not the retained older protocol archives.
 - `MdbaseConnect`, `MdbaseApplicationDeclaration` and `MdbaseApplicationEntry` come from `@mdbase-dev/sdk`.
 - Test-only `createApplicationFixture` and `MemoryReplica` come from `@mdbase-dev/sdk/testing`; the production entry never imports testing.
 - The live public `MdbaseConnect` singleton owns lifecycle, `application()` and `connection(id)`. `snapshot.selection` distinguishes a requested collection from an actually usable one; an unapproved request cannot borrow an old ready connection.
