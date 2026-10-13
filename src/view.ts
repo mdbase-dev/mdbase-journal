@@ -103,7 +103,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
         record.state === "saved_on_device" ? "Saved on this device; waiting for sync" : "On this device";
     }
     if (!message) message = !phase ? "On this device. Sign-in is unavailable in this build." :
-      phase.kind === "unavailable" ? "On this device. Opening collections isn't available here." :
+      phase.kind === "unavailable" ? `On this device. ${phase.problem.title}. ${phase.problem.message}` :
       phase.kind === "authorizing" ? "Waiting for approval in the mdbase window…" :
       phase.kind === "opening" ? `Opening ${name}. Your text stays on this device.` :
       phase.kind === "needs_approval" ? "Approve the collection, or choose another. Your text stays on this device." :
@@ -111,7 +111,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       phase.kind === "problem" ? `${phase.problem.title}. Your text stays on this device.` :
       phase.kind === "choosing" ? "Choose a collection. Your text stays on this device." :
       data ? "On this device" : "On this device. Sign in to save.";
-    status.textContent = message;
+    const warning = state?.saveWarning ? describeError(state.saveWarning) : null;
+    status.textContent = warning ? `${message} · ${warning.message}` : message;
     status.setAttribute("role", problem ? "alert" : "status");
     // The button's own name: what pressing it does, then the current status.
     element("status-button").setAttribute("aria-label", `${problem && data ? "Save again" : "Journal settings"}. ${message}`);

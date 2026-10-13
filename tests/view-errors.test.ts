@@ -8,6 +8,32 @@ import {journalConnection} from "../src/application.js";
 import {mountJournal} from "../src/view.js";
 import {applicationFixture, catalog, deferred, memoryStorage} from "./support.js";
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+void test("storage eviction warning uses SDK copy only while pending risk is reported", async () => {
+  const f = await applicationFixture(), window = new JSDOM(html, {runScripts: "outside-only"}).window;
+  const job = deferred<ReturnType<typeof catalog>>();
+  const describe = mock.method(f.records, "describe", () => job.promise);
+  const view = mountJournal(window.document, new JournalDrafts(memoryStorage()), f.mdbase);
+  try {
+    const copy = describeError("storage_may_be_evicted")!;
+    assert(!window.document.getElementById("status")!.textContent!.includes(copy.message));
+    f.fixture.controls.publishSnapshot({...f.ready, saveWarning: "storage_may_be_evicted"});
+    assert(window.document.getElementById("status")!.textContent!.includes(copy.message));
+    assert.equal((window.document.getElementById("page") as HTMLTextAreaElement).disabled, false);
+    f.fixture.controls.publishSnapshot({...f.ready, saveWarning: null});
+    assert(!window.document.getElementById("status")!.textContent!.includes(copy.message));
+  } finally {view.dispose(); describe.mock.restore(); job.resolve(catalog()); window.close(); f.close();}
+});
+for (const code of ["browser_unsupported", "application_storage_unavailable"]) void test(`unavailable ${code} displays SDK copy while keeping local writing`, async () => {
+  const f = await applicationFixture(), window = new JSDOM(html, {runScripts: "outside-only"}).window;
+  f.fixture.controls.publishSnapshot({...f.ready, status: "blocked", problem: code, selectedCollectionId: null});
+  const view = mountJournal(window.document, new JournalDrafts(memoryStorage()), f.mdbase);
+  try {
+    const copy = describeError(code)!;
+    const visible = window.document.getElementById("status")!.textContent!;
+    assert(visible.includes(copy.title)); assert(visible.includes(copy.message));
+    assert.equal((window.document.getElementById("page") as HTMLTextAreaElement).disabled, false);
+  } finally {view.dispose(); window.close(); f.close();}
+});
 void test("registration diagnostics stay developer-only instead of appearing on the writing surface", async () => {
   const f = await applicationFixture(), window = new JSDOM(html, {runScripts: "outside-only"}).window;
   const state = {...f.ready, status: "blocked" as const, problem: "application_registration_refused", problemDetail: {
