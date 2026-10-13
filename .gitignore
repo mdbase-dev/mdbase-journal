@@ -5,3 +5,4 @@ public/journal.js
 .application-build-*/
 .typed-tests-first/
 public/mdbase-collections.css
+public/mdbase-shell-*.js
