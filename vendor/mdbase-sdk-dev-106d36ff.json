@@ -1,0 +1,25 @@
+{
+  "label": "dev intake, not release-qualified",
+  "sourceCommit": "106d36ffc6ae0c59a509229d5eaed00515b603bd",
+  "artifact": "mdbase-dev-sdk-106d36ff.tgz",
+  "bytes": 4321939,
+  "sha256": "338ea5fc2ada5df3e5bbaad9cb3609a8d042776e5b6cd45ab93825303da40582",
+  "integrity": "sha512-DNJLo+HHS4A1lDyOxEjtfmOyDj02ZsQhsATgZc9Pa6Hg9A0cedkOOy3ZJHLAMVp+NTsi9WQrRSGGR65iqtSYqA==",
+  "native": {
+    "available": true,
+    "qualification": "packaged dev assets; integrity-pinned, not separately signed; not LAB admission",
+    "sourceCommit": "965963fc2944fd624f561bd583062ae8c8336a05",
+    "sha256": "51f4a0c4e20fedd8d8e2f2bb66f540aff7e4050c2901b53fe556c0a0098d5a6d",
+    "bytes": 3580229
+  },
+  "protocol": {
+    "name": "@mdbase-dev/connect-protocol",
+    "file": "vendor/mdbase-dev-connect-protocol-0.1.0-beta.129-c280cd194ffd.tgz",
+    "bytes": 107322,
+    "sha256": "cd1e15236ab7e25c511a4ba13af6a9df23f4b41715161479bba97b0445e1c138",
+    "sri": "sha512-c0iOOWEcNJRstdyUJ6aqJ3puVR5C9jXW4MBHmQnHI2c4vgOeKi5VWfiuueWx3ArvtwB3nPuAaXHhll/OKH/+Yw==",
+    "source": "c280cd194ffd74e2c72b9d08a74d71bd43fa7321"
+  },
+  "coldNpmEmptyRootCacheConsumerPass": true,
+  "vendorWarnings": []
+}
