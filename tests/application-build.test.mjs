@@ -39,7 +39,7 @@ test("consumer build retains original same-artifact Worker/native bytes and no p
     assert(bundled.filter(path=>path.startsWith("node_modules/@mdbase-dev/sdk/")).every(path=>!/\/(testing|native)\/|application\/(entry|worker)/.test(path)));
     assert.equal(await readFile(resolve(output,"mdbase-collections.css"),"utf8"),await readFile(resolve(root,"node_modules/@mdbase-dev/ui/css/collections.css"),"utf8"));
     for(const member of ["application/worker.js","native/sqlite3.js","native/runtime-lab.wasm","native/sqlite3.wasm"]){
-      const archive=resolve(root,"vendor/mdbase-dev-sdk-106d36ff.tgz");
+      const archive=resolve(root,"vendor/mdbase-dev-sdk-f1aa67e3.tgz");
       const original=execFileSync("tar",["-xOf",archive,`package/dist/${member}`],{maxBuffer:16*1024*1024});
       assert.deepEqual(await readFile(resolve(output,"sdk",member)),original);
     }
