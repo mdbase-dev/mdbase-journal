@@ -173,7 +173,11 @@ export class JournalData {
     }
   }
   setBody(id: string, body: string, source?: {body: string; revision: string | null}): Promise<void> {
+    const expectedRevision = this.drafts.get(id)?.revision;
     return this.drafts.mutate(() => {
+      // A storage notification can wait behind newer input in the origin lock.
+      // It owns the text it observed, not a fresh revision of that newer draft.
+      if (this.drafts.get(id)?.revision !== expectedRevision) return;
       const draft = this.drafts.patch(id, {body, touchedMs: Date.now()});
       this.ensure(draft);
       if (this.problems.has(id)) throw new Error(this.problems.get(id));
