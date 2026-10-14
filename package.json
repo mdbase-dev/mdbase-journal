@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build-application.mjs",
+    "deploy:lab": "MDBASE_ENV=lab node scripts/deploy-lab.mjs",
     "build:local": "node scripts/build-application.mjs --writing-only",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm test && npm run build:local",
