@@ -6,7 +6,7 @@ import {completeAppGrantCallback} from "./grant-callback.js";
 declare const JOURNAL_APPLICATION_INPUTS: JournalApplicationInputs | null;
 // The Private collection consent window returns here: hand its result to the
 // waiting Journal tab and close, without starting a second SDK owner.
-if (!completeAppGrantCallback(new URL(location.href), {document, load: () => import("@mdbase-dev/sdk/app-grant"), close: () => window.close()})) {
+if (!completeAppGrantCallback(new URL(location.href), {document, load: () => import("@mdbase-dev/sdk/app-grant")})) {
   mountReturningNotice(document, () => localStorage);
   // A writing-only build never supplies a pretend registered ID or SDK runtime.
   const entry = JOURNAL_APPLICATION_INPUTS === null ? null : createJournalApplication(JOURNAL_APPLICATION_INPUTS);

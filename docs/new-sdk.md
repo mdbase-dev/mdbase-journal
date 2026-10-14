@@ -1,5 +1,20 @@
 # Public SDK application intake
 
+## Current unified SDK intake — 2026-10-14
+
+SDK `72f8ea6caeafa4b089d3ee14c3b38ce492511a2c` replaces the prior
+`3f417b6d` intake below. Original archive SHA256:
+`d58ee0fb78f2a3bfb49cc70e92bea69fe2292eb2b1cfff0cd9c222efba6d9374`.
+The ordinary Sign in / Add chooser owns one popup and the original Native
+preparation, callback and custody ACK. The callback page delivers only; the
+original SDK closes after completion. No app-side alternate protocol, scope,
+key transfer or grant-store migration is introduced. Application declaration and
+storage identities remain unchanged. Tests and LAB builds do not prove Native
+admission, READ/edit/reload or production release qualification.
+
+## Prior intake notes (superseded SDK pin)
+
+
 Journal consumes the immutable SDK4c dev packet through ordinary local file dependencies. This is development intake, not release/runtime qualification.
 
 - SDK source: `3f417b6d941a42444f17568d7489071d23fcb141`.
