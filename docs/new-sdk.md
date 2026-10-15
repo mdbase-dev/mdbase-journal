@@ -1,6 +1,16 @@
 # Public SDK application intake
 
-## Current unified SDK intake — 2026-10-14
+## Current declared Private setup SDK intake — 2026-10-15
+
+SDK `d3559aaacbffc4177929e93f9fc8649df835c14c` (db20 setup plus the
+strict app-grant declaration fix), original archive SHA256
+`0cb1b8ead1aecf50856711d655eaa28ae2f353a9c3eede9c3ea0658ac8f868e2`,
+uses the original negotiated Native setup producer and protected original-MID
+receipt recovery. Native runtime source is `a4331ad466a0d16e87ab3bedeb0963a1e0d1867e`.
+No declaration, storage identity, capability expansion or Hosted fallback.
+LAB deployment and fresh Private acceptance are separate evidence.
+
+## Prior unified SDK intake — 2026-10-14
 
 SDK `72f8ea6caeafa4b089d3ee14c3b38ce492511a2c` replaces the prior
 `3f417b6d` intake below. Original archive SHA256:
