@@ -239,6 +239,26 @@ test("a durable peer-tab edit feeds the same ready native lease without losing e
     assert.equal(draft.reviewRequired, undefined);
   } finally {va.dispose(); vb?.dispose(); describe.mock.restore(); ha.window.close(); hb.window.close(); f.close();}
 });
+test("reload reacquires the original confirmed entry and shows Saved without another write", async () => {
+  const f = await applicationFixture(), h = dom(), storage = memoryStorage(), drafts = new JournalDrafts(storage);
+  const describe = mock.method(f.records, "describe", async () => catalog());
+  const first = mountJournal(h.window.document, drafts, f.mdbase);
+  let reloaded: ReturnType<typeof mountJournal> | null = null;
+  try {
+    h.write("Confirmed original note");
+    await until(() => h.window.document.getElementById("status")!.textContent === "Saved" || undefined);
+    const original = first.currentDraft(); first.dispose();
+    const create = mock.method(f.records, "create"), save = mock.method(f.records, "save");
+    try {
+      reloaded = mountJournal(h.window.document, new JournalDrafts(storage), f.mdbase);
+      await until(() => h.window.document.getElementById("status")!.textContent === "Saved" || undefined);
+      assert.equal(reloaded.currentDraft().id, original.id); assert.equal(h.page.value, original.body);
+      assert.equal(reloaded.currentDraft().recordId, original.recordId);
+      assert.equal(create.mock.callCount(), 0); assert.equal(save.mock.callCount(), 0);
+      assert.equal((await f.records.get(original.recordId!, {body: true})).body, original.body);
+    } finally {create.mock.restore(); save.mock.restore();}
+  } finally {first.dispose(); reloaded?.dispose(); describe.mock.restore(); h.window.close(); f.close();}
+});
 test("late catalog completion after disposal cannot start data writes or close a borrowed client", async () => {
   const f = await applicationFixture(), h = dom(), job = deferred<ReturnType<typeof catalog>>();
   const describe = mock.method(f.records, "describe", () => job.promise), close = mock.method(f.records, "close"), create = mock.method(f.records, "create");

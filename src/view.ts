@@ -226,7 +226,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       if (!earlier) throw new DraftPersistenceError();
       if (current.body.trim()) drafts.patch(current.id, {finished: true, touchedMs: Date.now()});
       current = drafts.patch(id, {finished: false, touchedMs: Date.now()}); unpersistedDraft = false;
-      clearUndo(); problem = null; renderPage(); render(); page.focus();
+      clearUndo(); problem = null; renderPage(); save(); page.focus();
     } catch {problem = "Keep this page open: Journal cannot restore the earlier text safely."; render();}
   });}
   function visibleEntries(): {entry: JournalEntry; draft: JournalDraft | null}[] {
@@ -330,7 +330,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     const owned = data, selectedType = type, queue = opens;
     if (!owned || !selectedType || !queue || disposed || memoryOnly) {render(); return;}
     try {
-      for (const draft of drafts.list()) queue.request(draft.id, selectedType);
+      for (const draft of drafts.list()) queue.request(draft.id, selectedType, draft.id === current.id);
     } catch {problem = "Keep this page open: Journal cannot read its drafts on this device.";}
     render();
   }

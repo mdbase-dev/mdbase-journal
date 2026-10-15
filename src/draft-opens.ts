@@ -17,10 +17,12 @@ export class DraftOpens {
     this.notificationPending = true;
     queueMicrotask(() => {this.notificationPending = false; if (!this.disposed && this.isCurrent()) this.notify();});
   }
-  request(id: string, type: JournalEntryType): void {
+  // The viewed confirmed entry still needs its original live lease after reload.
+  // Inactive clean drafts stay closed; local metadata alone never means Saved.
+  request(id: string, type: JournalEntryType, viewed = false): void {
     if (this.disposed || !this.isCurrent()) return;
     const draft = this.drafts.get(id);
-    if (!draft || draft.legacyKey || !draft.body.trim() || draft.body === draft.savedBody ||
+    if (!draft || draft.legacyKey || !draft.body.trim() || draft.body === draft.savedBody && (!viewed || !draft.recordId) ||
         draft.targetCollectionId && draft.targetCollectionId !== this.data.connection.id || this.data.snapshot(id) || this.jobs.has(id)) return;
     this.jobs.add(id); this.states.set(id, {state: "opening"}); this.changed();
     void this.open(id, type);
