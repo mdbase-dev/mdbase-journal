@@ -1,16 +1,16 @@
 {
   "label": "dev intake, not release-qualified",
-  "sourceCommit": "e93ed4bc855cd867850c998993f6e9a596e9868d",
-  "artifact": "mdbase-dev-sdk-e93ed4bc.tgz",
-  "bytes": 4422213,
-  "sha256": "9956ef8b47dbca3c199c1c9c499d6bf06479252cf6e54c93108a030758a2759c",
-  "integrity": "sha512-PlaRjA8BICm4y2TYhuoMA0tXTlph101+i9oSchAQD8kM0rafMwHo1tyJy4th7/1P9VcE2XZ1Rbr2BIVDQVI1Wg==",
+  "sourceCommit": "0ecbef415a8b18cf7eb1bdbe41c2e963cc4de4d2",
+  "artifact": "mdbase-dev-sdk-0ecbef41.tgz",
+  "bytes": 4425112,
+  "sha256": "30658b0877383a53577172782a164e5bab3f07552c3c3cc97ec7df8ffa420a76",
+  "integrity": "sha512-4OZ2+PnQOIoHOq1M5ctvKt3DNYsdPHGcGcKiP1nPD9v6udkLXnDNN3qc0TQGUfmtazKNIEQpSfogffzcZlHJeA==",
   "native": {
     "available": true,
     "qualification": "packaged dev assets; integrity-pinned, not separately signed; not LAB admission",
-    "sourceCommit": "a4331ad466a0d16e87ab3bedeb0963a1e0d1867e",
-    "sha256": "3c803e83f81a05855f6e30ca79036d6b19383048a6b11ba5c9a0b5ebf3a1bbe2",
-    "bytes": 3655948
+    "sourceCommit": "4fb345e4ebb99538a8e20a8218b410a14928021a",
+    "sha256": "7d45ae07741b165b51b39d684c28014fcdf178ceeef05b233c78f7b9fa35137a",
+    "bytes": 3655960
   },
   "protocol": {
     "name": "@mdbase-dev/connect-protocol",
