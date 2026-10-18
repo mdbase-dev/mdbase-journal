@@ -154,6 +154,42 @@ test("clean native SDK source updates reconcile text as well as its saved baseli
     assert.equal(drafts.get(draft.id)?.savedBody, "Seed\nCurrent source");
   } finally {data.release(); h.close();}
 });
+for (const confirmed of [true, false]) test(`an own ${confirmed ? "confirmed" : "on-device"} save does not invalidate typing captured before its echo`, async () => {
+  const h = await applicationFixture({confirmed}), drafts = new JournalDrafts(memoryStorage());
+  const draft = drafts.put({...drafts.blank(h.connection.id), body: "Seed", path: "self-echo.md"});
+  const data = new JournalData(h.connection, drafts);
+  try {
+    const lease = await data.open(draft.id, journalEntryTypes(catalog())[0]!);
+    const seed = lease.session.getSnapshot();
+    await data.setBody(draft.id, "Seed\nMy first edit", {body: seed.body, revision: seed.record.revision});
+    // The next input already read this source, but the origin storage lock has
+    // not run it yet when the previous autosave's genuine SDK receipt arrives.
+    const shown = lease.session.getSnapshot();
+    await data.flush(draft.id);
+    assert.notEqual(lease.session.getSnapshot().record.revision, shown.record.revision);
+    await data.setBody(draft.id, "Seed\nMy first edit\nMore typing", {body: shown.body, revision: shown.record.revision});
+    assert.equal(drafts.get(draft.id)?.reviewRequired, undefined);
+    assert.equal(lease.session.getSnapshot().body, "Seed\nMy first edit\nMore typing");
+  } finally {data.release(); h.close();}
+});
+test("an own save witness cannot excuse a later same-body outside metadata edit", async () => {
+  const h = await applicationFixture(), drafts = new JournalDrafts(memoryStorage());
+  const draft = drafts.put({...drafts.blank(h.connection.id), body: "Seed", path: "outside-metadata.md"});
+  const data = new JournalData(h.connection, drafts);
+  try {
+    const lease = await data.open(draft.id, journalEntryTypes(catalog())[0]!);
+    await data.setBody(draft.id, "My edit"); const shown = lease.session.getSnapshot();
+    await data.flush(draft.id); const own = lease.session.getSnapshot();
+    const write = await h.records.save(h.records.update(own.record, {patch: {outside: "Other editor"}}));
+    assert.equal(write.outcome, "confirmed");
+    for (let i = 0; i < 100 && lease.session.getSnapshot().record.revision === own.record.revision; i++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.notEqual(lease.session.getSnapshot().record.revision, own.record.revision);
+    assert.equal(lease.session.getSnapshot().body, shown.body);
+    await assert.rejects(data.setBody(draft.id, "My edit with stale typing", {body: shown.body, revision: shown.record.revision}), /changed elsewhere/);
+    assert.equal(drafts.get(draft.id)?.reviewRequired, true);
+    assert.equal((await h.records.get(own.record.id, {body: true})).body, "My edit");
+  } finally {data.release(); h.close();}
+});
 test("files use the same public FilesApi and real SDK protocol", async () => {
   const h = await applicationFixture(), data = new JournalData(h.connection, new JournalDrafts(memoryStorage()));
   try {
