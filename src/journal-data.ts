@@ -40,6 +40,9 @@ export class JournalData {
   private readonly unsubscriptions = new Map<string, () => void>();
   private readonly unpins = new Map<string, () => void>();
   private readonly problems = new Map<string, string>();
+  /** Last SDK capture per borrowed lease, retained only to recognise its own
+   * receipt advancing a displayed revision while input waits for local storage. */
+  private readonly capturedEdits = new Map<string, {mutationId: string; baseRevision: string; body: string}>();
   private disposed = false;
   constructor(readonly connection: MdbaseApplicationConnection, private readonly drafts: JournalDrafts) {
     if (connection.files !== connection.records.files || connection.id !== connection.records.collection) throw new Error("Journal must use the original collection client.");
@@ -147,7 +150,10 @@ export class JournalData {
       if (snapshot.state === "saved" && snapshot.body !== draft.savedBody && draft.body !== snapshot.body) throw new Error("This note changed elsewhere. Your local text has been preserved.");
       const unsubscribe = lease.session.subscribe(() => {
         if (this.disposed || !this.connection.isCurrent() || this.problems.has(id)) return;
-        const value = lease.session.getSnapshot();
+        const value = lease.session.getSnapshot(), capture = value.recovery;
+        if (value.state === "saving" && capture?.baseRevision && capture.recordId === value.record.id && this.capturedEdits.get(id)?.mutationId !== capture.mutationId) {
+          this.capturedEdits.set(id, {mutationId: capture.mutationId, baseRevision: capture.baseRevision, body: value.body});
+        }
         if (value.state === "saved" && !value.dirty) {
           void this.drafts.mutate(() => {
             const local = this.drafts.get(id);
@@ -168,7 +174,7 @@ export class JournalData {
       if (this.problems.has(id)) throw new Error(this.problems.get(id));
       return lease;
     } catch (error) {
-      this.unsubscriptions.get(id)?.(); this.unsubscriptions.delete(id); this.leases.delete(id);
+      this.unsubscriptions.get(id)?.(); this.unsubscriptions.delete(id); this.leases.delete(id); this.capturedEdits.delete(id);
       lease.release(); throw error;
     }
   }
@@ -183,8 +189,16 @@ export class JournalData {
       if (this.problems.has(id)) throw new Error(this.problems.get(id));
       const session = this.leases.get(id)?.session;
       const actual = session?.getSnapshot();
-      // Never attach stale displayed text to a freshly advanced SDK revision.
-      if (source && actual && actual.body !== body && (actual.body !== source.body || !actual.dirty && source.revision !== null && actual.record.revision !== source.revision)) {
+      const capture = this.capturedEdits.get(id), receipt = actual?.lastReceipt;
+      // A completed original SDK capture may advance the source before this
+      // input gets the origin lock. Require its exact base/body, mutation and
+      // receipt's current-record witness; outside/unknown outcomes still refuse.
+      const ownSave = source && actual && capture && capture.baseRevision === source.revision && capture.body === source.body && actual.body === source.body &&
+        (actual.state === "saved" || actual.state === "saved_on_device") && receipt?.mutation === capture.mutationId &&
+        (receipt.state === "confirmed" || receipt.state === "pending") && receipt.status !== "conflicted" &&
+        receipt.records?.some(record => record.id === actual.record.id && record.revision === actual.record.revision);
+      // Never attach stale displayed text to a freshly advanced outside revision.
+      if (source && actual && actual.body !== body && (actual.body !== source.body || !actual.dirty && source.revision !== null && actual.record.revision !== source.revision && !ownSave)) {
         this.drafts.patch(id, {reviewRequired: true});
         throw new Error("This note changed elsewhere. Your local text has been preserved.");
       }
@@ -232,7 +246,7 @@ export class JournalData {
     for (const unsubscribe of this.unsubscriptions.values()) unsubscribe();
     this.unsubscriptions.clear();
     for (const lease of this.leases.values()) lease.release();
-    this.leases.clear(); this.listeners.clear(); this.problems.clear();
+    this.leases.clear(); this.listeners.clear(); this.problems.clear(); this.capturedEdits.clear();
     for (const unpin of this.unpins.values()) unpin(); this.unpins.clear();
     // Borrowed clients and SDK singleton are never closed by a writing view.
   }
