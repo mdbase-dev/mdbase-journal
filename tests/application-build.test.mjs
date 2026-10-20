@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import {test} from "node:test";
 import {mkdtemp,readFile,rm} from "node:fs/promises";
 import {execFileSync} from "node:child_process";
-import {fileURLToPath} from "node:url";
+import {fileURLToPath,pathToFileURL} from "node:url";
 import {resolve} from "node:path";
-import {applicationInputs,buildApplication} from "../scripts/build-application.mjs";
+import {applicationInputs} from "../scripts/build-application.mjs";
+import {legacyLabFixture} from "./legacy-lab-fixture.mjs";
 import {buildJournalManifest} from "../scripts/build-manifest.mjs";
 const root=fileURLToPath(new URL("../",import.meta.url));
 test("native build requires environment and exact origin; the ID defaults to the manifest's",()=>{
@@ -28,6 +29,8 @@ test("manifest homepage follows the build origin and defaults to the pages.dev o
 });
 test("consumer build retains original same-artifact Worker/native bytes and no private/test entry",async()=>{
   const output=await mkdtemp(resolve(root,".application-build-"));
+  const fixture=await legacyLabFixture();
+  const {buildApplication}=await import(pathToFileURL(resolve(fixture.root,"scripts/build-application.mjs")).href);
   try{
     const result=await buildApplication({writingOnly:true,env:{},output});
     assert.equal(result.inputs,null);assert.equal(result.writingOnly,true);
@@ -59,5 +62,5 @@ test("consumer build retains original same-artifact Worker/native bytes and no p
     assert.doesNotMatch(html,/(?:href|src)="\.\//);
     assert.match(await readFile(resolve(output,"sdk/application/app-grant.js"),"utf8"),/deliverAppGrantCallback/);
     assert.doesNotMatch(html,/connect-popup|native-signin-ui|cdn.jsdelivr|callback-note/);
-  }finally{await rm(output,{recursive:true,force:true});}
+  }finally{await fixture.close();await rm(output,{recursive:true,force:true});}
 });

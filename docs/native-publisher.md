@@ -3,7 +3,9 @@
 This NEW workflow is unregistered. Co approved a native-tag bootstrap, **not a
 main merge to register dispatch**. Nothing here creates tags, resources, policies,
 credentials or production authority. Existing LAB `deploy:lab`, project/profile,
-SDK/UI/protocol pins and actual `runtime-lab.wasm` metadata remain unchanged.
+retained LAB0ec originals and actual `runtime-lab.wasm` metadata remain unchanged.
+Root NPM now pins the independently approved STAGING SDK a302 original; approved
+UI9553 and protocol129c280 pins/originals remain unchanged.
 
 ## Authority and original intake
 
@@ -49,10 +51,13 @@ are never authentication gates.
 Missing/noncanonical target originals refuse; LAB never becomes staging by an
 origin/environment flag. TNAPP's actual STAGING SDK a3023aee is READY (05:48 owner handoff;
 NXtrust authentication/readback05:38), with parent-preserved original custody.
-This does not commit Journal's target intake: current Journal still pins LAB0ec
-and cannot publish a native target. Target repin and target-source qualification
-are separate future owner work; no pin or per-app UI choice changes here. No SDK/native build/repack
-is part of this publisher.
+Journal's separately authorized target intake now commits that original plus its
+byte-verbatim public packet and minimal frozen NPM SDK pin/integrity changes.
+The approved per-app UI stays ORIGINAL9553 (85693 bytes, SHA256
+`5e388db28365cf6a966017851ece1c32223ea8b55bc6015d2f1b4113d86a3206`), not UIfe/b2
+or another app's qualification. Historical producer/dev-intake limitations remain
+original evidence, not rewritten fresh peer qualification. No SDK/native build,
+repack, reauthentication or production approval is part of this intake.
 
 ## Exact publication reference and external protection
 
@@ -171,15 +176,29 @@ readiness, managed read or Journal acceptance/admission proof.
 
 ## Local checks and remaining gates
 
-`npm run test:publisher` is dependency-free Node coverage (synthetic in-memory
-packet/ZIP fixtures, not authenticated target originals). `npm run verify` is
-full existing generic source compatibility; its builds remain pinned **LAB/local**,
-not actual native staging/prod qualification. Neither invokes this workflow.
+`npm run test:publisher` is Node coverage including synthetic packet/ZIP fixtures
+and data-only actual original/installed-member binding. Full `npm test` preserves
+ALL retained LAB consumer/loader assertions in isolated original-LAB fixtures,
+not relabelled STAGING SDK installations. Existing LAB build scripts/vendor/profile
+are unchanged; root generic `build:local` is NOT STAGING qualification and must not
+pretend the new STAGING dependency is LAB. Do not duplicate generic builds.
 
-Still external: Journal's uncommitted intake of the now-READY authenticated
-STAGING originals with its separately approved UI original, reviewed frozen
-target NPM intake/packet facts, source/qualification evidence and target
-compatibility (production originals/GO remain separate);
+For an authorized actual local STAGING consumer build, FIRST commit/freeze source,
+then run `node scripts/qualify-staging.mjs /absolute/external/new-output-directory`.
+The separate local-only runner requires a CLEAN real HEAD/tree (no override),
+checks independent owner facts SHA plus all frozen originals/installed members,
+and invokes the SAME unprivileged target builder with public expectations only.
+It never emulates GitHub refs/events or bypasses a protected publication guard;
+no publication envelope or artifact ID is minted. Strict manifest/actual compiled
+trust/native/SQLite checks, effective HTTPS origins/no loopback, private-grant
+callback separation and full post-offline inventory remain required. The actual
+SDK embeds its offline asset JSON in `mdbase-shell-sw.js`: safe DATA-only parsing
+checks all eligible cached paths/digests/version, independently of the larger full
+inventory including hidden/control/map/type/native bytes. No invented
+`offline-assets.json`, alias asset, dropped guard or Worker evaluation.
+
+Still external: reviewed target source/qualification evidence and actual app
+compatibility/acceptance (production originals/GO remain separate);
 protected immutable branch/tag/workflow and exact environment/tag policies;
 actual per-env public-hash custody/fallback audit; domains/credentials/Callum UI
 review/no-bypass; real alias serving and native application acceptance. Production

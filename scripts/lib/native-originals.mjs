@@ -134,7 +134,12 @@ export async function bindCanonicalPacket({target,hashes,archives,members,packet
   const factsBytes = await packetFile('artifact-facts.json'), facts = JSON.parse(factsBytes);
   const sdk = archives.sdk;
   const membersBytes=await packetFile('members.json');
-  equal(JSON.parse(membersBytes), members, 'producer complete SDK inventory mismatch');
+  const producerMembers=JSON.parse(membersBytes);
+  requireValue(Array.isArray(producerMembers),'producer complete SDK inventory mismatch');
+  // Producer locale ordering differs from tar/installed byte ordering. Compare
+  // ALL full tuples, sorting only a copy; never rewrite the original sidecar,
+  // deduplicate, omit fields or relax exact paths/lengths/digests.
+  equal([...producerMembers].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0), members, 'producer complete SDK inventory mismatch');
   requireValue(facts.archive === sdk.path.split('/').at(-1) && facts.bytes === sdk.bytes && facts.sha256 === sdk.sha256 && facts.sri === sdk.sri && facts.members === sdk.members && /^[a-f0-9]{40}$/.test(facts.source) && /^[a-f0-9]{40}$/.test(facts.sourceTree), 'canonical artifact facts mismatch');
   const provenanceBytes = await packetFile('provenance.json');
   requireValue(provenanceBytes.equals(sdkFiles['dist/native/provenance.json']), 'provenance not byte-identical to original');

@@ -107,3 +107,14 @@ test('failed receipts retain source/tree/run/artifact/inventory/digests/UUID and
  const receipt=createReceipt({plan:f.plan,inventory:f.inventory,deployment,verification:{ok:true,failures:[],unverified:[],verified:[]},artifact:{before:{id:42}},env:{GITHUB_RUN_ID:'23',GITHUB_RUN_ATTEMPT:'2',ARTIFACT_ID:'42'}});
  assert.equal(receipt.status,'failed-or-incomplete');assert.equal(receipt.source.tree,f.plan.tree);assert.equal(receipt.deployment.id,uuid);assert.equal(receipt.artifact.before.id,42);assert.equal(receipt.assets.length,f.inventory.length);assert.equal(receipt.admission,'not assessed');
 });
+test('actual SDK inline offline manifest is parsed as DATA, without invented sidecars or dropping full inventory',async()=>{
+ const {checkOfflineManifest}=await import('../scripts/qualify-staging.mjs');
+ const inventory=fixture().inventory.sort((a,b)=>a.path<b.path?-1:1);
+ const assets=inventory.filter(a=>!a.path.split('/').some(p=>/^[._]/.test(p)) && a.path!=='mdbase-shell-sw.js').map(({path,sha256})=>({path,sha256}));
+ const manifest={base:'/',version:hash(JSON.stringify({base:'/',assets,existing:''})),assets};
+ const frame=json=>'\n// mdbase shared offline shell\nimport {installOfflineShell} from "./mdbase-shell-runtime.js";\ninstallOfflineShell(self, '+json+');\n';
+ assert.deepEqual(checkOfflineManifest(frame(JSON.stringify(manifest)),inventory),manifest);
+ for(const patch of [{assets:assets.slice(1)},{assets:[...assets,{path:'.well-known/mdbase-app.json',sha256:hash('{}')}]},{version:'f'.repeat(64)},{base:'http://localhost/'}])assert.throws(()=>checkOfflineManifest(frame(JSON.stringify({...manifest,...patch})),inventory));
+ assert.throws(()=>checkOfflineManifest(frame('(()=>{globalThis.__journalOfflineExecuted=true;return {}})()'),inventory));assert.equal(globalThis.__journalOfflineExecuted,undefined);
+ assert(inventory.length>assets.length);assertCoverage(inventory,fixture().plan);
+});

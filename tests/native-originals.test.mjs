@@ -37,6 +37,13 @@ for(const target of ['staging','production'])test('canonical '+target+' packet b
  assert.equal(result.release.assetSha256,f.hashes.NATIVE_TRUST_ASSET_SHA256);assert.equal(result.environment,target);
  assert.notEqual(result.trustModuleSha256,result.release.assetSha256);assert.notEqual(result.packet.contextSha256,result.release.assetSha256);
 });
+test('producer member ordering is not archive identity; all exact path/length/hash tuples still required',async()=>{
+ const f=packetFixture();f.packetFiles['members.json']=Buffer.from(JSON.stringify([...f.members].reverse()));
+ await bindCanonicalPacket(f);
+ for(const change of [a=>a.push(a[0]),a=>a[0].sha256='f'.repeat(64),a=>a[0].bytes++,a=>a[0].path='substitute',a=>a[0].unexpected=true]){
+  const bad=packetFixture(),members=structuredClone(bad.members);change(members);bad.packetFiles['members.json']=Buffer.from(JSON.stringify(members));await assert.rejects(bindCanonicalPacket(bad),/inventory mismatch/);
+ }
+});
 test('actual TNAPP canonical native source is mdbase-next, distinct from Connect trust source',()=>{
  const f=packetFixture(),facts=JSON.parse(f.packetFiles['artifact-facts.json']),provenance=JSON.parse(f.packetFiles['provenance.json']);
  assert.doesNotThrow(()=>assertNativeOriginalFacts(facts,provenance));
@@ -72,6 +79,14 @@ for(const [label,mutate] of Object.entries({
  'native original':f=>f.sdkFiles['dist/native/runtime.wasm']=Buffer.from('substitute'),
  'protocol original custody':f=>alter(f,'artifact-facts.json',o=>o.dependencies[0].sha256='f'.repeat(64)),
 }))test('canonical binding refuses '+label,async()=>{const f=packetFixture();mutate(f);await assert.rejects(bindCanonicalPacket(f));});
+test('actual approved STAGING NPM intake binds independent owner facts and ALL installed originals before SDK execution',async()=>{
+ const {loadStagingOriginals,STAGING_FACTS_SHA256}=await import('../scripts/staging-originals.mjs');
+ const originals=await loadStagingOriginals({repoRoot:new URL('../',import.meta.url).pathname,installed:true});
+ assert.equal(originals.packet.factsSha256,STAGING_FACTS_SHA256);assert.equal(originals.environment,'staging');
+ assert.deepEqual(Object.fromEntries(Object.entries(originals.archives).map(([name,a])=>[name,a.members])),{sdk:896,ui:78,protocol:67});
+ assert.equal(originals.release.assetSha256,'67e117646c9c26927f0d5a44cbd26f057c318975032e9cd24f24b020150cdbc7');
+ assert.notEqual(originals.release.assetSha256,originals.trustModuleSha256);
+});
 test('protected hash set is exactly four canonical byte expectations; missing never defaults to candidate',()=>{
  const f=packetFixture();assert.equal(Object.keys(protectedHashes(f.hashes)).length,4);
  for(const name of Object.keys(f.hashes)){const h={...f.hashes};delete h[name];assert.throws(()=>protectedHashes(h),/four protected/);}

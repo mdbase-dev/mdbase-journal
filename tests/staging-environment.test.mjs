@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
 import {mkdtemp,rm} from "node:fs/promises";
-import {fileURLToPath} from "node:url";
+import {fileURLToPath,pathToFileURL} from "node:url";
 import {resolve} from "node:path";
-import {applicationInputs,buildApplication,nativeAssetNames} from "../scripts/build-application.mjs";
+import {applicationInputs,nativeAssetNames} from "../scripts/build-application.mjs";
+import {legacyLabFixture} from './legacy-lab-fixture.mjs';
 import {buildJournalManifest} from "../scripts/build-manifest.mjs";
 import {JOURNAL_DEPLOYMENT_TARGETS,journalDeploymentFor,journalLabDeploymentFor} from "../scripts/deployment-environment.mjs";
 const root=fileURLToPath(new URL("../",import.meta.url));
@@ -79,10 +80,12 @@ test("native asset names come from the packaged SDK declaration, not a hardcoded
   assert.deepEqual([...nativeAssetNames(current)].sort(),["runtime-lab.wasm","sqlite3.js","sqlite3.wasm"]);
   assert.throws(()=>nativeAssetNames("export {}"),/native/);
 });
-test("a staging/production native build refuses while the pinned SDK trust is for LAB",async()=>{
+test("retained actual LAB profile refuses staging/production; new STAGING SDK is never relabelled LAB",async()=>{
   const output=await mkdtemp(resolve(root,".application-build-"));
+  const fixture=await legacyLabFixture();
+  const {buildApplication}=await import(pathToFileURL(resolve(fixture.root,'scripts/build-application.mjs')).href);
   try{
     for(const [environment,origin] of [["staging",STAGING],["production",PRODUCTION]])
       await assert.rejects(()=>buildApplication({output,env:{JOURNAL_REGISTERED_APPLICATION_ID:"build-fixture-only",JOURNAL_ENVIRONMENT:environment,JOURNAL_ORIGIN:origin}}),/trust/);
-  }finally{await rm(output,{recursive:true,force:true});}
+  }finally{await fixture.close();await rm(output,{recursive:true,force:true});}
 });

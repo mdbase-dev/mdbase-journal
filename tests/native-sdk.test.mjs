@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import { createHash, webcrypto } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { test } from "node:test";
+import { after, test } from "node:test";
+import { pathToFileURL } from 'node:url';
 import vm from "node:vm";
-import { buildSdk } from "../scripts/build-sdk.mjs";
+import { legacyLabFixture } from './legacy-lab-fixture.mjs';
 
+const fixture=await legacyLabFixture();after(()=>fixture.close());
+const at=path=>new URL(path,pathToFileURL(fixture.root+'/'));
+const { buildSdk } = await import(at('scripts/build-sdk.mjs'));
 await buildSdk();
-const { SDK_ASSET } = await import("../public/sdk/pin.mjs");
-const { loadNativeSdk } = await import("../public/load-native-sdk.mjs");
-const browser = await readFile(new URL("../public/sdk/mdbase-sdk.min.js", import.meta.url));
+const { SDK_ASSET } = await import(at('public/sdk/pin.mjs'));
+const { loadNativeSdk } = await import(at('public/load-native-sdk.mjs'));
+const browser = await readFile(at('public/sdk/mdbase-sdk.min.js'));
 
 function harness() {
   const global = vm.createContext({ TextEncoder, TextDecoder, URL, crypto: webcrypto, setTimeout, clearTimeout });

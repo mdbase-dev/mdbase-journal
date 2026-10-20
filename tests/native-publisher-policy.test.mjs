@@ -28,6 +28,8 @@ test('frozen app install disables generated NPM bin links without relaxing ALL-m
  const s=await source('.github/workflows/native-journal.yml');
  assert.match(s,/npm ci --ignore-scripts --no-bin-links --no-audit --no-fund/);
  assert.match(s,/node node_modules\/typescript\/bin\/tsc --noEmit/);
+ const pkg=JSON.parse(await source('package.json'));
+ assert.equal(pkg.scripts.typecheck,'node node_modules/typescript/bin/tsc --noEmit','--no-bin-links must never fall through to a global compiler');
 });
 test('original intake uses frozen NPM lock, not PNPM or a new authentication authority',async()=>{
  const s=await source('scripts/lib/native-originals.mjs');
