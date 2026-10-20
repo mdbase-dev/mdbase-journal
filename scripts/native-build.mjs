@@ -5,7 +5,7 @@ import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { loadOriginals, protectedHashes } from './lib/native-originals.mjs';
 import { headersPolicy, redirectsPolicy } from './native-hosting.mjs';
-import { publicationInventory } from './native-publisher.mjs';
+import { publicationInventory, serializeInventory } from './native-publisher.mjs';
 const output=resolve(process.argv[2]),plan=JSON.parse(await readFile(join(output,'plan.json'),'utf8'));
 const root=process.cwd();
 // ALL installed SDK/UI/protocol members, frozen NPM intake, canonical packet
@@ -32,4 +32,4 @@ if(!validateAppManifest(manifest,{allowLocal:false}).valid)throw Error('Canonica
 await writeFile(join(publish,'_headers'),headersPolicy);await writeFile(join(publish,'_redirects'),redirectsPolicy);
 await buildOfflineShell({directory:publish});
 // Final inventory is AFTER offline shell, including every dot/underscore byte.
-await writeFile(join(output,'inventory.json'),JSON.stringify(await publicationInventory(publish,plan),null,2));
+await writeFile(join(output,'inventory.json'),serializeInventory(await publicationInventory(publish,plan)));

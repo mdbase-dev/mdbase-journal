@@ -1,7 +1,12 @@
 # Native Journal publisher — source only
 
-This NEW workflow is unregistered. Co approved a native-tag bootstrap, **not a
-main merge to register dispatch**. Nothing here creates tags, resources, policies,
+The exact native-tag bootstrap SUCCEEDED in real push run39398656261/attempt1
+at b9a812d, without a default-main merge or dispatch registration. That run's
+build and official Wrangler4.114 install succeeded; protected comparison then
+failed on one CLI-added inventory LF BEFORE project/upload. Its failed receipts
+remain immutable evidence, not a publication/admission result. No retry/tag edit
+or fresh operational run is authorized by this source-only fix.
+Nothing here creates tags, resources, policies,
 credentials or production authority. Existing LAB `deploy:lab`, project/profile,
 retained LAB0ec originals and actual `runtime-lab.wasm` metadata remain unchanged.
 Root NPM now pins the independently approved STAGING SDK eaa4e697 original; approved
@@ -130,6 +135,17 @@ pending-deployments API, approval hash or machine approval substitute.
    `_headers`/`_redirects`. `assertInventory` runs immediately before the last
    current-HEAD guard and sole `pages deploy --no-bundle`, in a config/Functions-
    free TEMP cwd. Post-upload inventory assertion gates served verification.
+
+### Exact inventory serialization
+
+Artifact inventory and protected CLI stdout use ONE source-owned serializer:
+UTF-8, two-space `JSON.stringify`, **NO trailing LF**. This preserves the actual
+first552-file artifact's84537 bytes/SHA d7af. The CLI uses `process.stdout.write`,
+not `console.log`'s additional LF. Source plans retain their original newline
+contract. Strict shell `cmp` is unchanged: no trim/fuzzy JSON equality, reordering,
+file exclusion or changed inventory data. Saved CI originals are never rewritten.
+The real successful dedicated installer supersedes the historical local offline
+cache miss as a current operational install blocker; old evidence remains intact.
 
 ### Failure evidence before a qualified artifact exists
 

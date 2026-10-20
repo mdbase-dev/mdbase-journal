@@ -34,6 +34,9 @@ export function assertCoverage(inventory,plan) {
  need(paths.get('sdk/application/packaged-trust.js')?.sha256===plan.sdkTrust.trustModuleSha256,'original compiled trust module');
  need(inventory.every(a=>a.bytes<=25*1024*1024),'Pages 25 MiB file limit');
 }
+// Canonical artifact inventory bytes: UTF-8, two-space JSON, NO trailing LF.
+// Shared by the build writer and protected CLI; plans keep their existing LF.
+export function serializeInventory(inventory) { return JSON.stringify(inventory,null,2); }
 export async function publicationInventory(directory,plan) {
  const inventory=await inventoryDirectory(directory,{maxFileBytes:25*1024*1024});
  assertBuiltManifest(JSON.parse(await readFile(join(directory,'.well-known/mdbase-app.json'),'utf8')),plan);
@@ -90,7 +93,7 @@ if(process.argv[1]===fileURLToPath(import.meta.url)) {
  const json=async path=>JSON.parse(await readFile(path,'utf8'));
  try {
   if(command==='guard')console.log(JSON.stringify(await sourcePlan({installed:args.includes('--installed')}),null,2));
-  else if(command==='inventory')console.log(JSON.stringify(await publicationInventory(args[0],await json(args[1])),null,2));
+  else if(command==='inventory')process.stdout.write(serializeInventory(await publicationInventory(args[0],await json(args[1]))));
   else if(command==='assert-inventory')await assertInventory(args[0],await json(args[1]));
   else if(command==='project')console.log(JSON.stringify(await assertExistingProject({accountId:process.env.CLOUDFLARE_ACCOUNT_ID,apiToken:process.env.CLOUDFLARE_API_TOKEN}),null,2));
   else if(command==='capture')console.log(JSON.stringify(await captureDeployment({output:await readFile(args[0],'utf8'),target:process.env.TARGET,sha:process.env.SOURCE_SHA,accountId:process.env.CLOUDFLARE_ACCOUNT_ID,apiToken:process.env.CLOUDFLARE_API_TOKEN}),null,2));
