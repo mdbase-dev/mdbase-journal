@@ -141,6 +141,8 @@ HTTP evidence additionally persists numeric status before reading the body, then
 bounded public body identity/error fields and its captured-byte length/SHA before
 HTTP/JSON refusal or the next lookup (including403/404/429). Body reads have a
 256KiB/30s bound; partial/truncated bodies are labelled incomplete and fail closed.
+The ZIP endpoint's 302 body must also complete without truncation before any blob
+request. Its body need not be JSON; status 302 alone cannot clear a failed read.
 Only fixed public GitHub messages/docs URLs are retained literally; arbitrary
 messages/non-JSON bodies retain bounded fingerprints, not opaque text. No request
 headers/credentials/unknown response fields/blob SAS URLs or raw exceptions.

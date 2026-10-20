@@ -65,6 +65,34 @@ test('actual ZIP digest checked before extraction, metadata/run rebound after, s
  const evidence=JSON.parse(await readFile(join(parent,'artifact-metadata.json')));assert.equal(evidence.downloadedSha256,hash(bytes));assert.equal(evidence.after.id,42);
  await assertArtifactDirectory(join(parent,'artifact'),e);
 });
+for(const [label,body,expectedTruncated] of [
+ ['oversized',()=>new Response('x'.repeat(256*1024+1),{status:302,headers:{location:'https://blob.fixture/archive.zip'}}),true],
+ ['reader-failed',()=>new Response(new ReadableStream({pull(controller){controller.error(Error('UNIT-private-redirect-reader'));}}),{status:302,headers:{location:'https://blob.fixture/archive.zip'}}),false]
+])test('incomplete '+label+' ZIP redirect body refuses before any blob request',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-redirect-incomplete-'));t.after(()=>rm(parent,{recursive:true,force:true}));
+ const bytes=zip(Object.entries(await files()).map(([p,b])=>[p,b,0o100644])),digest='sha256:'+hash(bytes),m={...meta,digest};
+ const mock=transport(bytes,{actualMeta:m,after:m});let blobCalls=0;
+ await assert.rejects(download({...expected,digest},join(parent,'artifact'),async(url,init)=>{
+  if(String(url).endsWith('/zip'))return body();
+  if(String(url)==='https://blob.fixture/archive.zip')blobCalls++;
+  return mock(url,init);
+ }),/bounded archive redirect body/);
+ assert.equal(blobCalls,0);
+ const text=await readFile(join(parent,'artifact-metadata.json'),'utf8'),evidence=JSON.parse(text);
+ assert.equal(evidence.zipResponse.status,302);assert.equal(evidence.zipResponse.bodyComplete,false);assert.equal(evidence.zipResponse.bodyTruncated,expectedTruncated);
+ assert.equal(evidence.failure.stage,'zip-redirect-validation');assert.equal(evidence.failure.reason,'bounded archive redirect body');
+ assert(!Object.hasOwn(evidence,'blobResponse'));assert(!Object.hasOwn(evidence,'downloadedSha256'));assert(!text.includes('UNIT-private'));
+ await assert.rejects(readFile(join(parent,'journal-native.zip')),{code:'ENOENT'});
+});
+test('complete non-JSON ZIP redirect body permits the same verified download',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-redirect-complete-'));t.after(()=>rm(parent,{recursive:true,force:true}));
+ const bytes=zip(Object.entries(await files()).map(([p,b])=>[p,b,0o100644])),digest='sha256:'+hash(bytes),m={...meta,digest};
+ const mock=transport(bytes,{actualMeta:m,after:m});
+ await download({...expected,digest},join(parent,'artifact'),async(url,init)=>String(url).endsWith('/zip')?new Response('Redirecting',{status:302,headers:{location:'https://blob.fixture/archive.zip'}}):mock(url,init));
+ const evidence=JSON.parse(await readFile(join(parent,'artifact-metadata.json')));
+ assert.equal(evidence.zipResponse.bodyComplete,true);assert.equal(evidence.zipResponse.bodyTruncated,false);assert.equal(evidence.zipResponse.bodySha256,hash('Redirecting'));
+ assert.equal(evidence.downloadedSha256,hash(bytes));assert(!Object.hasOwn(evidence,'failure'));
+});
 for(const [label,entries] of Object.entries({traversal:[['../escape','x',0o100644]],link:[['link','target',0o120777]],device:[['device','x',0o020666]],duplicate:[['a','x',0o100644],['a','y',0o100644]],casefold:[['A','x',0o100644],['a','y',0o100644]],parentFile:[['a','x',0o100644],['a/b','y',0o100644]],absolute:[['/a','x',0o100644]],backslash:[['a\\b','x',0o100644]]}))test('safe ZIP refuses '+label+' before extraction',async t=>{
  const parent=await mkdtemp(join(tmpdir(),'journal-unsafe-'));t.after(()=>rm(parent,{recursive:true,force:true}));
  const bytes=zip(entries),digest='sha256:'+hash(bytes),m={...meta,digest};

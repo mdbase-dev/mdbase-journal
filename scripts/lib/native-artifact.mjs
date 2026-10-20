@@ -123,8 +123,9 @@ export async function download(expected, root, transport = fetch) {
     stage='initial-run-validation';assertArtifactRun(run,expected);
     stage='zip-redirect-fetch';
     const response = await transport(`${base}/actions/artifacts/${expected.id}/zip`, {headers:{Authorization:`Bearer ${token}`},redirect:'manual',signal:AbortSignal.timeout(30000)});
-    await captureResponse(response,'zipResponse','artifact');
+    const redirectBody=await captureResponse(response,'zipResponse','artifact');
     stage='zip-redirect-validation';requireValue(response.status === 302, 'archive redirect');
+    requireValue(redirectBody.complete && !redirectBody.truncated, 'bounded archive redirect body');
     const location = new URL(response.headers.get('location'));
     requireValue(location.protocol === 'https:' && !location.username && !location.password, 'archive HTTPS');
     // Never forward GitHub credentials to the blob endpoint or retain its URL.
