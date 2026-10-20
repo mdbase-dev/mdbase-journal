@@ -76,30 +76,45 @@ jobs:
       artifact-id: ${{ steps.artifact.outputs.artifact-id }}
       artifact-digest: ${{ steps.artifact.outputs.artifact-digest }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.native-tag.outputs.source }}
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - id: node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-      - name: Frozen originals before install, all installed originals before candidate execution
+      - id: evidence
+        name: Minimal public identity before intake or candidate SDK execution
+        run: node scripts/native-build-evidence.mjs begin "$RUNNER_TEMP/journal-build-failure"
+      - id: intake
+        name: Frozen originals before install, all installed originals before candidate execution
         run: |
           set -euo pipefail
           mkdir "$RUNNER_TEMP/journal-build"
+          node scripts/native-build-evidence.mjs mark "$RUNNER_TEMP/journal-build-failure" original-hashes
           node scripts/native-publisher.mjs guard > "$RUNNER_TEMP/journal-build/plan.json"
           # No generated nested .bin symlinks in otherwise byte-exact originals.
+          node scripts/native-build-evidence.mjs mark "$RUNNER_TEMP/journal-build-failure" frozen-install
           npm ci --ignore-scripts --no-bin-links --no-audit --no-fund
+          node scripts/native-build-evidence.mjs mark "$RUNNER_TEMP/journal-build-failure" installed-members
           node scripts/native-publisher.mjs guard --installed > "$RUNNER_TEMP/installed-plan.json"
+          node scripts/native-build-evidence.mjs mark "$RUNNER_TEMP/journal-build-failure" installed-plan
           cmp "$RUNNER_TEMP/journal-build/plan.json" "$RUNNER_TEMP/installed-plan.json"
+          node scripts/native-build-evidence.mjs mark "$RUNNER_TEMP/journal-build-failure" typecheck
           node node_modules/typescript/bin/tsc --noEmit
+          node scripts/native-build-evidence.mjs mark "$RUNNER_TEMP/journal-build-failure" publisher-tests
           npm run test:publisher
-      - name: Target app build once, canonical manifest, final post-offline inventory
+      - id: build
+        name: Target app build once, canonical manifest, final post-offline inventory
         run: |
           set -euo pipefail
+          node scripts/native-build-evidence.mjs mark "$RUNNER_TEMP/journal-build-failure" app-build
           node scripts/native-build.mjs "$RUNNER_TEMP/journal-build"
+          node scripts/native-build-evidence.mjs mark "$RUNNER_TEMP/journal-build-failure" envelope
           node scripts/native-build-envelope.mjs "$RUNNER_TEMP/journal-build"
       - id: artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -108,6 +123,25 @@ jobs:
           path: ${{ runner.temp }}/journal-build/
           include-hidden-files: true
           if-no-files-found: error
+          retention-days: 90
+      - id: failure-receipt
+        name: Retain only minimal public unprivileged failure evidence
+        if: failure()
+        env:
+          BUILD_CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          BUILD_NODE_OUTCOME: ${{ steps.node.outcome }}
+          BUILD_EVIDENCE_OUTCOME: ${{ steps.evidence.outcome }}
+          BUILD_INTAKE_OUTCOME: ${{ steps.intake.outcome }}
+          BUILD_BUILD_OUTCOME: ${{ steps.build.outcome }}
+          BUILD_ARTIFACT_OUTCOME: ${{ steps.artifact.outcome }}
+        run: node scripts/native-build-evidence.mjs failure "$RUNNER_TEMP/journal-build-failure"
+      - name: Preserve failure-only evidence, never the qualified publish artifact
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: journal-native-build-failure-${{ needs.native-tag.outputs.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/journal-build-failure/
+          if-no-files-found: warn
           retention-days: 90
 
   native-upload:

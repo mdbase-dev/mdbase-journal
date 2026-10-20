@@ -47,13 +47,13 @@ with zipfile.ZipFile(b,'w') as z:
   z.writestr(i,item[1])
 sys.stdout.buffer.write(b.getvalue())`,JSON.stringify(entries)]);
 }
-function transport(bytes,{after=meta,runAfter=run,actualMeta=meta}={}) {
+function transport(bytes,{after=meta,runAfter=run,actualMeta=meta,initialRun=run}={}) {
  let metas=0,runs=0;
  return async(url,init)=>{
   url=String(url);
   if(url==='https://blob.fixture/archive.zip'){assert(!init.headers);assert.equal(init.credentials,'omit');return new Response(bytes,{headers:{'content-length':String(bytes.length)}});}
   if(url.endsWith('/zip'))return new Response(null,{status:302,headers:{location:'https://blob.fixture/archive.zip'}});
-  if(url.includes('/actions/runs/'))return Response.json(++runs===1?run:runAfter);
+  if(url.includes('/actions/runs/'))return Response.json(++runs===1?initialRun:runAfter);
   return Response.json(++metas===1?actualMeta:after);
  };
 }
@@ -79,5 +79,64 @@ test('bad ZIP digest and changed immutable metadata/run block',async t=>{
  await assert.rejects(download({...expected,digest},join(parent,'moved/artifact'),transport(bytes,{actualMeta:m,after:{...m,digest:expected.digest}})),/immutable ID\/digest/);
  await assert.rejects(download({...expected,digest},join(parent,'attempt/artifact'),transport(bytes,{actualMeta:m,after:m,runAfter:{...run,run_attempt:3}})),/run attempt/);
  const failedAfter=JSON.parse(await readFile(join(parent,'attempt/artifact-metadata.json')));
+ assert.equal(failedAfter.failure.stage,'after-run-validation');assert.match(failedAfter.failure.reason,/run attempt/);
  assert.equal(failedAfter.runAfter.run_attempt,3);assert.equal(failedAfter.after.id,42);assert.equal(failedAfter.downloadedSha256,hash(bytes));
+});
+test('wrong INITIAL attempt is saved before validation and no ZIP is requested',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-initial-attempt-'));t.after(()=>rm(parent,{recursive:true,force:true}));
+ const mock=transport(Buffer.alloc(0),{initialRun:{...run,run_attempt:3}});let zipCalls=0;
+ await assert.rejects(download(expected,join(parent,'artifact'),async(url,init)=>{if(String(url).endsWith('/zip'))zipCalls++;return mock(url,init);}),/run attempt/);
+ assert.equal(zipCalls,0);
+ const evidence=JSON.parse(await readFile(join(parent,'artifact-metadata.json')));
+ assert.equal(evidence.run.run_attempt,3);assert.equal(evidence.before.id,42);
+ assert.equal(evidence.failure.stage,'initial-run-validation');assert.match(evidence.failure.reason,/run attempt/);
+ assert(!Object.hasOwn(evidence,'downloadedSha256'));assert(!Object.hasOwn(evidence,'after'));
+});
+test('successful AFTER metadata survives failed subsequent runAfter lookup',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-after-lookup-'));t.after(()=>rm(parent,{recursive:true,force:true}));
+ const bytes=zip(Object.entries(await files()).map(([p,b])=>[p,b,0o100644])),digest='sha256:'+hash(bytes),m={...meta,digest};
+ const mock=transport(bytes,{actualMeta:m,after:m});let runs=0;
+ await assert.rejects(download({...expected,digest},join(parent,'artifact'),async(url,init)=>{
+  if(String(url).includes('/actions/runs/') && ++runs===2)throw Error('UNIT-private-token-do-not-retain');
+  return mock(url,init);
+ }));
+ const text=await readFile(join(parent,'artifact-metadata.json'),'utf8'),evidence=JSON.parse(text);
+ assert.equal(evidence.after.id,42);assert.equal(evidence.run.run_attempt,2);assert.equal(evidence.downloadedSha256,hash(bytes));
+ assert(!Object.hasOwn(evidence,'runAfter'));assert.equal(evidence.failure.stage,'after-run-fetch');assert.equal(evidence.failure.reason,'operation-failed');
+ assert(!text.includes('UNIT-private-token'));
+});
+test('first metadata fetch failure retains honest minimal expected identity, no invented responses',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-first-lookup-'));t.after(()=>rm(parent,{recursive:true,force:true}));let calls=0;
+ await assert.rejects(download(expected,join(parent,'artifact'),async()=>{calls++;return new Response('UNIT-private-body-do-not-retain',{status:403});}),/GitHub metadata unavailable/);
+ assert.equal(calls,1);
+ const text=await readFile(join(parent,'artifact-metadata.json'),'utf8'),evidence=JSON.parse(text);
+ assert.deepEqual(evidence.expected,expected);assert.equal(evidence.failure.stage,'before-metadata-fetch');
+ for(const key of ['before','run','after','runAfter','downloadedSha256'])assert(!Object.hasOwn(evidence,key));
+ assert(!text.includes('UNIT-private-body'));
+});
+test('initial run fetch failure retains BEFORE metadata and a safe stage, never raw errors',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-initial-lookup-'));t.after(()=>rm(parent,{recursive:true,force:true}));let calls=0;
+ await assert.rejects(download(expected,join(parent,'artifact'),async()=>{if(++calls===1)return Response.json(meta);throw Error('UNIT-private-error');}));
+ const text=await readFile(join(parent,'artifact-metadata.json'),'utf8'),evidence=JSON.parse(text);
+ assert.equal(evidence.before.id,42);assert(!Object.hasOwn(evidence,'run'));assert.equal(evidence.failure.stage,'initial-run-fetch');assert.equal(evidence.failure.reason,'operation-failed');
+ assert(!text.includes('UNIT-private-error'));
+});
+test('each response is on disk before the next lookup; only public validation identity is retained',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-public-metadata-'));t.after(()=>rm(parent,{recursive:true,force:true}));
+ const bytes=zip(Object.entries(await files()).map(([p,b])=>[p,b,0o100644])),digest='sha256:'+hash(bytes);
+ const m={...meta,digest,headers:{Authorization:'UNIT-private-header'},archive_download_url:'https://fixture/?UNIT-private-url',token:'UNIT-private-token'};
+ const mock=transport(bytes,{actualMeta:m,after:m});let runs=0;
+ await assert.rejects(download({...expected,digest,token:'UNIT-private-expected'},join(parent,'artifact'),async(url,init)=>{
+  url=String(url);
+  if(url.includes('/actions/runs/')){
+   const evidence=JSON.parse(await readFile(join(parent,'artifact-metadata.json')));
+   assert.equal(evidence.before.id,42);
+   if(++runs===2){assert.equal(evidence.after.id,42);throw Error('UNIT-private-transport');}
+  }
+  if(url.endsWith('/zip'))assert.equal(JSON.parse(await readFile(join(parent,'artifact-metadata.json'))).run.run_attempt,2);
+  return mock(url,init);
+ }));
+ assert.equal(runs,2);
+ const text=await readFile(join(parent,'artifact-metadata.json'),'utf8'),evidence=JSON.parse(text);assert.equal(evidence.after.id,42);assert.equal(evidence.run.run_attempt,2);assert.equal(evidence.failure.stage,'after-run-fetch');
+ assert(!text.includes('UNIT-private'));assert(!text.includes('Authorization'));assert(!text.includes('archive_download_url'));
 });

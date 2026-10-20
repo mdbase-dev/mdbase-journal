@@ -6,7 +6,27 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertInventory, inventoryDirectory } from './native-publish-bytes.mjs';
 const sha = b => createHash('sha256').update(b).digest('hex');
-const requireValue = (ok, reason) => { if (!ok) throw Error(`Artifact refusal: ${reason}`); };
+class ArtifactRefusal extends Error {
+  constructor(reason) { super(`Artifact refusal: ${reason}`); this.reason=reason; }
+}
+const requireValue = (ok, reason) => { if (!ok) throw new ArtifactRefusal(reason); };
+// Only public identity fields used by the unchanged validators. Never retain
+// API/request headers, signed blob URLs, arbitrary response fields or errors.
+function publicFields(value, keys) {
+  const out={};
+  for(const key of keys) {
+    const v=value?.[key];
+    if(v===null || typeof v==='boolean' || (typeof v==='number' && Number.isSafeInteger(v)) ||
+      (typeof v==='string' && v.length<=512 && !/[\u0000-\u001f\u007f]/.test(v)))out[key]=v;
+  }
+  return out;
+}
+function publicMetadata(value, kind) {
+  const out=publicFields(value,kind==='run'?['id','head_sha','run_attempt','event','head_branch','path']:['id','expired','digest','name']);
+  const key=kind==='run'?'repository':'workflow_run';
+  if(value && Object.hasOwn(value,key))out[key]=value[key]===null?null:publicFields(value[key],kind==='run'?['id','full_name']:['id','head_sha','head_repository_id']);
+  return out;
+}
 export function assertArtifactMetadata(meta, expected) {
   requireValue(/^[1-9][0-9]*$/.test(expected.id??'') && /^[1-9][0-9]*$/.test(expected.run??'') && /^[1-9][0-9]*$/.test(expected.attempt??'') && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(expected.repository??'') && expected.event==='push' && expected.ref===`refs/tags/native-publish-${expected.target}-${expected.source}`, 'expected transport identity');
   requireValue(meta.id === Number(expected.id) && meta.expired === false && meta.digest === expected.digest && /^sha256:[a-f0-9]{64}$/.test(meta.digest), 'immutable ID/digest');
@@ -38,36 +58,52 @@ export async function download(expected, root, transport = fetch) {
   };
   await mkdir(join(root,'..'),{recursive:true});
   const evidence = join(root,'../artifact-metadata.json');
-  const before = await get(`/actions/artifacts/${expected.id}`);
-  await writeFile(evidence,JSON.stringify({before,expected},null,2));
-  assertArtifactMetadata(before,expected);
-  const run = await get(`/actions/runs/${expected.run}`);
-  assertArtifactRun(run,expected);
-  const response = await transport(`${base}/actions/artifacts/${expected.id}/zip`, {headers:{Authorization:`Bearer ${token}`},redirect:'manual',signal:AbortSignal.timeout(30000)});
-  requireValue(response.status === 302, 'archive redirect');
-  const location = new URL(response.headers.get('location'));
-  requireValue(location.protocol === 'https:' && !location.username && !location.password, 'archive HTTPS');
-  // Never forward GitHub credentials to the blob endpoint.
-  const blob = await transport(location,{redirect:'error',credentials:'omit',signal:AbortSignal.timeout(60000)});
-  requireValue(blob.ok && Number(blob.headers.get('content-length')) <= 512*1024*1024,'archive size/status');
-  const chunks=[]; let size=0;
-  for await (const chunk of blob.body) { size+=chunk.length; requireValue(size<=512*1024*1024,'archive size'); chunks.push(chunk); }
-  const bytes=Buffer.concat(chunks),downloadedSha256=sha(bytes);
-  await writeFile(evidence,JSON.stringify({before,run,expected,downloadedSha256},null,2));
-  requireValue(`sha256:${downloadedSha256}` === expected.digest,'download digest');
-  await mkdir(root,{recursive:true});
-  const zip=join(root,'../journal-native.zip'); await writeFile(zip,bytes,{flag:'wx'});
-  // Validate ALL names/modes before extracting; no archive scripts or links.
-  execFileSync('python3',['-B',fileURLToPath(new URL('./artifact-zip.py',import.meta.url)),zip,root]);
-  const after = await get(`/actions/artifacts/${expected.id}`);
-  const runAfter = await get(`/actions/runs/${expected.run}`);
-  // Preserve the failing after-read too; validation must not erase evidence.
-  await writeFile(evidence,JSON.stringify({before,after,run,runAfter,expected,downloadedSha256},null,2));
-  assertArtifactRun(runAfter,expected);
-  assertArtifactMetadata(after,expected);
-  requireValue(sha(await readFile(zip)) === expected.digest.slice(7), 'post-download archive digest');
-  await assertArtifactDirectory(root,expected);
-  // Metadata and actual ZIP digest remain outside the immutable upload tree.
+  const observed={expected:publicFields(expected,['id','digest','repository','repositoryId','run','attempt','event','ref','source','tree','target'])};
+  const persist=()=>writeFile(evidence,JSON.stringify(observed,null,2));
+  const remember=async(key,value)=>{observed[key]=value;await persist();};
+  let stage='before-metadata-fetch';
+  // Even a failed FIRST lookup retains honest source/run expectations only.
+  await persist();
+  try {
+    const before = await get(`/actions/artifacts/${expected.id}`);
+    await remember('before',publicMetadata(before,'artifact'));
+    stage='before-metadata-validation';assertArtifactMetadata(before,expected);
+    stage='initial-run-fetch';const run = await get(`/actions/runs/${expected.run}`);
+    await remember('run',publicMetadata(run,'run'));
+    stage='initial-run-validation';assertArtifactRun(run,expected);
+    stage='zip-redirect-fetch';
+    const response = await transport(`${base}/actions/artifacts/${expected.id}/zip`, {headers:{Authorization:`Bearer ${token}`},redirect:'manual',signal:AbortSignal.timeout(30000)});
+    stage='zip-redirect-validation';requireValue(response.status === 302, 'archive redirect');
+    const location = new URL(response.headers.get('location'));
+    requireValue(location.protocol === 'https:' && !location.username && !location.password, 'archive HTTPS');
+    // Never forward GitHub credentials to the blob endpoint or retain its URL.
+    stage='zip-download';
+    const blob = await transport(location,{redirect:'error',credentials:'omit',signal:AbortSignal.timeout(60000)});
+    stage='zip-size-status';requireValue(blob.ok && Number(blob.headers.get('content-length')) <= 512*1024*1024,'archive size/status');
+    const chunks=[]; let size=0;stage='zip-read';
+    for await (const chunk of blob.body) { size+=chunk.length; requireValue(size<=512*1024*1024,'archive size'); chunks.push(chunk); }
+    const bytes=Buffer.concat(chunks),downloadedSha256=sha(bytes);
+    await remember('downloadedSha256',downloadedSha256);
+    stage='zip-digest-validation';requireValue(`sha256:${downloadedSha256}` === expected.digest,'download digest');
+    stage='zip-write';await mkdir(root,{recursive:true});
+    const zip=join(root,'../journal-native.zip'); await writeFile(zip,bytes,{flag:'wx'});
+    // Validate ALL names/modes before extracting; no archive scripts or links.
+    stage='zip-extraction';execFileSync('python3',['-B',fileURLToPath(new URL('./artifact-zip.py',import.meta.url)),zip,root]);
+    stage='after-metadata-fetch';const after = await get(`/actions/artifacts/${expected.id}`);
+    await remember('after',publicMetadata(after,'artifact'));
+    stage='after-metadata-validation';assertArtifactMetadata(after,expected);
+    stage='after-run-fetch';const runAfter = await get(`/actions/runs/${expected.run}`);
+    await remember('runAfter',publicMetadata(runAfter,'run'));
+    stage='after-run-validation';assertArtifactRun(runAfter,expected);
+    stage='post-download-digest';requireValue(sha(await readFile(zip)) === expected.digest.slice(7), 'post-download archive digest');
+    stage='artifact-directory';await assertArtifactDirectory(root,expected);
+    // Metadata and actual ZIP digest remain outside the immutable upload tree.
+  } catch(error) {
+    const reason=error instanceof ArtifactRefusal?error.reason:'operation-failed';
+    observed.failure={stage,reason};await persist();
+    // No transport error/body/request details (which could contain credentials).
+    throw new ArtifactRefusal(`${stage}: ${reason}`);
+  }
 }
 if(process.argv[1] === fileURLToPath(import.meta.url)) {
   try {

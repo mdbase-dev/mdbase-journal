@@ -105,6 +105,24 @@ pending-deployments API, approval hash or machine approval substitute.
    current-HEAD guard and sole `pages deploy --no-bundle`, in a config/Functions-
    free TEMP cwd. Post-upload inventory assertion gates served verification.
 
+### Failure evidence before a qualified artifact exists
+
+Before original intake or candidate execution the unprivileged job records only
+public target/source/tree (null if unavailable), repository/run/attempt/ref and a
+fixed stage. Hash, installed-member, app-build or other build-step refusal retains
+`journal-native-build-failure-<target>-<run>-<attempt>` separately, failure-only.
+Its sanitized receipt contains fixed step outcomes/refusal stage, never logs,
+environment dumps, contexts, candidate error text or publish-artifact outputs.
+The qualified artifact action still requires success; its ID/digest outputs are
+unchanged. A failed build still skips the protected upload job entirely.
+
+Artifact transport persists each observed public validation-identity response
+before validation or the next fallible lookup: before/run/ZIP SHA/after/runAfter.
+The first failed lookup retains expected identity only; missing responses are
+not invented. Fixed refusal stage/reason replace raw transport errors. Headers,
+credentials, signed blob URLs and unrelated API-response fields are not retained.
+This improves failure evidence, not authentication or upload authority.
+
 ## Existing hosting, static control policy and receipts
 
 Only the Ops-created Pages project **mdbase-journal**, ID
