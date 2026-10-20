@@ -1,0 +1,215 @@
+name: Native Journal protected publisher
+
+# NEW/unregistered: Co-approved native-tag bootstrap, never merge main to register.
+# Exact immutable tags/ref policies and separate Callum GO before PROD tag creation
+# are EXTERNAL prerequisites, not permissions self-certified by this workflow.
+on:
+  push:
+    tags:
+      - 'native-publish-staging-*'
+      - 'native-publish-production-*'
+
+permissions:
+  contents: read
+
+jobs:
+  native-tag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      target: ${{ steps.tag.outputs.target }}
+      source: ${{ steps.tag.outputs.source }}
+    steps:
+      - id: tag
+        name: Exact new target tag and full workflow/event commit (no candidate code)
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == push ]]
+          [[ "$GITHUB_REF" =~ ^refs/tags/native-publish-(staging|production)-([a-f0-9]{40})$ ]]
+          target="${BASH_REMATCH[1]}"; source="${BASH_REMATCH[2]}"
+          [[ "$GITHUB_SHA" == "$source" && "$GITHUB_WORKFLOW_SHA" == "$source" ]]
+          [[ "$GITHUB_WORKFLOW_REF" == "$GITHUB_REPOSITORY/.github/workflows/native-journal.yml@$GITHUB_REF" ]]
+          jq -e --arg ref "$GITHUB_REF" --arg repo "$GITHUB_REPOSITORY" '.ref == $ref and .created == true and .deleted == false and .forced == false and .repository.full_name == $repo' "$GITHUB_EVENT_PATH" > /dev/null
+          printf 'target=%s\nsource=%s\n' "$target" "$source" >> "$GITHUB_OUTPUT"
+
+  native-inputs:
+    needs: native-tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    # Protected public byte inputs ONLY; no checkout/candidate code/secrets.
+    environment: journal-${{ needs.native-tag.outputs.target }}
+    outputs:
+      sdk: ${{ steps.hashes.outputs.sdk }}
+      ui: ${{ steps.hashes.outputs.ui }}
+      protocol: ${{ steps.hashes.outputs.protocol }}
+      trust: ${{ steps.hashes.outputs.trust }}
+    steps:
+      - id: hashes
+        env:
+          NATIVE_SDK_SHA256: ${{ vars.NATIVE_SDK_SHA256 }}
+          NATIVE_UI_SHA256: ${{ vars.NATIVE_UI_SHA256 }}
+          NATIVE_PROTOCOL_SHA256: ${{ vars.NATIVE_PROTOCOL_SHA256 }}
+          NATIVE_TRUST_ASSET_SHA256: ${{ vars.NATIVE_TRUST_ASSET_SHA256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in NATIVE_SDK_SHA256 NATIVE_UI_SHA256 NATIVE_PROTOCOL_SHA256 NATIVE_TRUST_ASSET_SHA256; do
+            [[ "${!name}" =~ ^[a-f0-9]{64}$ ]]
+          done
+          printf 'sdk=%s\nui=%s\nprotocol=%s\ntrust=%s\n' "$NATIVE_SDK_SHA256" "$NATIVE_UI_SHA256" "$NATIVE_PROTOCOL_SHA256" "$NATIVE_TRUST_ASSET_SHA256" >> "$GITHUB_OUTPUT"
+
+  native-build:
+    name: Unprivileged frozen NPM Journal build ONCE
+    needs: [native-tag, native-inputs]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # NO environment, Cloudflare secret or privileged token in this job.
+    env:
+      TARGET: ${{ needs.native-tag.outputs.target }}
+      SOURCE_SHA: ${{ needs.native-tag.outputs.source }}
+      NATIVE_SDK_SHA256: ${{ needs.native-inputs.outputs.sdk }}
+      NATIVE_UI_SHA256: ${{ needs.native-inputs.outputs.ui }}
+      NATIVE_PROTOCOL_SHA256: ${{ needs.native-inputs.outputs.protocol }}
+      NATIVE_TRUST_ASSET_SHA256: ${{ needs.native-inputs.outputs.trust }}
+    outputs:
+      artifact-id: ${{ steps.artifact.outputs.artifact-id }}
+      artifact-digest: ${{ steps.artifact.outputs.artifact-digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.native-tag.outputs.source }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Frozen originals before install, all installed originals before candidate execution
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/journal-build"
+          node scripts/native-publisher.mjs guard > "$RUNNER_TEMP/journal-build/plan.json"
+          # No generated nested .bin symlinks in otherwise byte-exact originals.
+          npm ci --ignore-scripts --no-bin-links --no-audit --no-fund
+          node scripts/native-publisher.mjs guard --installed > "$RUNNER_TEMP/installed-plan.json"
+          cmp "$RUNNER_TEMP/journal-build/plan.json" "$RUNNER_TEMP/installed-plan.json"
+          node node_modules/typescript/bin/tsc --noEmit
+          npm run test:publisher
+      - name: Target app build once, canonical manifest, final post-offline inventory
+        run: |
+          set -euo pipefail
+          node scripts/native-build.mjs "$RUNNER_TEMP/journal-build"
+          node scripts/native-build-envelope.mjs "$RUNNER_TEMP/journal-build"
+      - id: artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: journal-native-build-${{ needs.native-tag.outputs.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/journal-build/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90
+
+  native-upload:
+    name: Protected immutable static Journal upload
+    needs: [native-tag, native-inputs, native-build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    concurrency:
+      group: journal-native-${{ needs.native-tag.outputs.target }}
+      cancel-in-progress: false
+    # EXTERNAL environment policy MUST admit the exact TAG event, not branch-only.
+    # Production: Callum required reviewer/no admin bypass, NOT prevent-self-review.
+    environment:
+      name: journal-${{ needs.native-tag.outputs.target }}
+      url: ${{ needs.native-tag.outputs.target == 'production' && 'https://journal.mdbase.dev' || 'https://staging.mdbase-journal.pages.dev' }}
+    env:
+      TARGET: ${{ needs.native-tag.outputs.target }}
+      SOURCE_SHA: ${{ needs.native-tag.outputs.source }}
+      NATIVE_SDK_SHA256: ${{ vars.NATIVE_SDK_SHA256 }}
+      NATIVE_UI_SHA256: ${{ vars.NATIVE_UI_SHA256 }}
+      NATIVE_PROTOCOL_SHA256: ${{ vars.NATIVE_PROTOCOL_SHA256 }}
+      NATIVE_TRUST_ASSET_SHA256: ${{ vars.NATIVE_TRUST_ASSET_SHA256 }}
+      ARTIFACT_ID: ${{ needs.native-build.outputs.artifact-id }}
+      ARTIFACT_DIGEST: ${{ needs.native-build.outputs.artifact-digest }}
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.native-tag.outputs.source }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Reviewed source guard without app dependencies
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/journal-receipt" "$RUNNER_TEMP/journal-upload"
+          node scripts/native-publisher.mjs guard > "$RUNNER_TEMP/journal-receipt/source-plan.json"
+          cp "$RUNNER_TEMP/journal-receipt/source-plan.json" "$RUNNER_TEMP/journal-receipt/plan.json"
+      - name: Install only dedicated minimal official Wrangler4.114 integrity lock
+        run: node scripts/native-tool.mjs "$RUNNER_TEMP/journal-tool-path"
+      - name: Same immutable artifact ID/actual ZIP digest/run/attempt/event/source/tree/target
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/lib/native-artifact.mjs "$RUNNER_TEMP/journal-upload/artifact"
+          cp "$RUNNER_TEMP/journal-upload/artifact/"{plan.json,inventory.json,envelope.json} "$RUNNER_TEMP/journal-receipt/"
+          cp "$RUNNER_TEMP/journal-upload/artifact-metadata.json" "$RUNNER_TEMP/journal-receipt/"
+          cmp "$RUNNER_TEMP/journal-receipt/source-plan.json" "$RUNNER_TEMP/journal-receipt/plan.json"
+          node scripts/native-publisher.mjs inventory "$RUNNER_TEMP/journal-upload/artifact/publish" "$RUNNER_TEMP/journal-receipt/source-plan.json" > "$RUNNER_TEMP/journal-receipt/revalidated-inventory.json"
+          cmp "$RUNNER_TEMP/journal-receipt/inventory.json" "$RUNNER_TEMP/journal-receipt/revalidated-inventory.json"
+          chmod -R a-w "$RUNNER_TEMP/journal-upload/artifact"
+      - name: Require existing Ops-created project identity/channel (never provision)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/native-publisher.mjs project > "$RUNNER_TEMP/journal-receipt/project.json"
+      - id: upload
+        name: Assert immutable inventory and CURRENT exact protected HEAD immediately before ONE upload
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch=$(jq -er .pagesBranch "$RUNNER_TEMP/journal-receipt/plan.json")
+          tool=$(< "$RUNNER_TEMP/journal-tool-path")
+          node scripts/native-publisher.mjs assert-inventory "$RUNNER_TEMP/journal-upload/artifact/publish" "$RUNNER_TEMP/journal-receipt/inventory.json"
+          node scripts/native-current-head.mjs
+          cd "$RUNNER_TEMP/journal-upload"
+          node "$tool" pages deploy artifact/publish --no-bundle --project-name mdbase-journal --branch "$branch" --commit-hash "$SOURCE_SHA" --commit-dirty=false 2>&1 | tee "$RUNNER_TEMP/journal-receipt/wrangler-output.txt"
+      - id: capture
+        name: Capture actual deployment UUID before served checks
+        if: always() && (steps.upload.outcome == 'success' || steps.upload.outcome == 'failure')
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/native-publisher.mjs capture "$RUNNER_TEMP/journal-receipt/wrangler-output.txt" > "$RUNNER_TEMP/journal-receipt/deployment.json"
+      - name: ALL served bytes and trusted static header/route probes (180s total)
+        if: always() && steps.upload.outcome == 'success' && steps.capture.outcome == 'success'
+        run: |
+          set -euo pipefail
+          node scripts/native-publisher.mjs assert-inventory "$RUNNER_TEMP/journal-upload/artifact/publish" "$RUNNER_TEMP/journal-receipt/inventory.json"
+          node scripts/native-hosting.mjs "$RUNNER_TEMP/journal-receipt/plan.json" "$RUNNER_TEMP/journal-receipt/inventory.json" "$RUNNER_TEMP/journal-receipt/deployment.json" > "$RUNNER_TEMP/journal-receipt/verification.json"
+      - name: Always retain failed/incomplete evidence, never retry/rebuild/rollback
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/journal-receipt"
+          if [ -f "$RUNNER_TEMP/journal-upload/artifact-metadata.json" ]; then cp "$RUNNER_TEMP/journal-upload/artifact-metadata.json" "$RUNNER_TEMP/journal-receipt/"; fi
+          node scripts/native-publisher.mjs receipt "$RUNNER_TEMP/journal-receipt" > "$RUNNER_TEMP/journal-receipt/receipt.json"
+      - name: Preserve source/run/artifact/inventory/digests/UUID/failure evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: journal-native-receipt-${{ needs.native-tag.outputs.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/journal-receipt/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 90

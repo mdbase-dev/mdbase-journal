@@ -29,11 +29,17 @@ export function nativeAssetNames(packagedAssetsSource){
   if(!names.size||![...names].some(name=>name.endsWith(".wasm")))throw new Error("Installed SDK packaged-assets declaration names no native assets.");
   return names;
 }
-export async function buildApplication({writingOnly=false,env=process.env,output=resolve(root,"public")}={}){
+export async function buildApplication({writingOnly=false,env=process.env,output=resolve(root,"public"),originals}={}){
   const inputs=writingOnly?null:applicationInputs(env);
   // Native builds declare their own origin as the manifest homepage, as SDK registration requires.
   const manifest=inputs&&await buildJournalManifest({origin:inputs.origin,allowLocal:inputs.environment==="lab",environment:inputs.environment});
-  const pin=JSON.parse(await readFile(resolve(root,"vendor/mdbase-sdk-dev-0ecbef41.json"),"utf8"));
+  // Protected publisher calls this only AFTER full frozen original/installed intake.
+  // Ordinary local/LAB builds retain the exact existing pin and behavior.
+  if(originals && (!inputs || inputs.environment!==originals.environment || !['staging','production'].includes(inputs.environment)))throw new Error("Native originals target mismatch");
+  const pin=originals ? {artifact:originals.archives.sdk.path.slice('vendor/'.length),bytes:originals.archives.sdk.bytes,
+    sha256:originals.archives.sdk.sha256,integrity:originals.archives.sdk.sri,sourceCommit:originals.sdkSource,
+    protocol:{file:originals.archives.protocol.path,sha256:originals.archives.protocol.sha256,sri:originals.archives.protocol.sri}}
+    : JSON.parse(await readFile(resolve(root,"vendor/mdbase-sdk-dev-0ecbef41.json"),"utf8"));
   const archive=resolve(root,"vendor",pin.artifact),bytes=await readFile(archive);
   assert.equal(bytes.length,pin.bytes);assert.equal(hash(bytes,"sha256"),pin.sha256);assert.equal(`sha512-${hash(bytes,"sha512","base64")}`,pin.integrity);
   const protocol=await readFile(resolve(root,pin.protocol.file));
@@ -45,6 +51,7 @@ export async function buildApplication({writingOnly=false,env=process.env,output
   // here, before any bytes are copied, until the per-environment repin.
   if(inputs){
     const {appReleaseTrust}=await import(pathToFileURL(resolve(installed,"application/packaged-trust.js")).href);
+    if(originals)for(const [key,value] of Object.entries(originals.release))assert.deepEqual(appReleaseTrust()[key],value,`Compiled release trust ${key} differs from frozen originals`);
     const trustEnvironment=appReleaseTrust().environment;
     if(trustEnvironment!==inputs.environment)throw new Error(`Journal ${inputs.environment} native build refused: the pinned SDK packet carries ${JSON.stringify(trustEnvironment)} release trust, not ${inputs.environment} trust. Repin the ${inputs.environment} SDK packet first.`);
   }

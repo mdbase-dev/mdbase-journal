@@ -1,0 +1,7 @@
+{
+  "name": "journal-native-upload-tool",
+  "private": true,
+  "dependencies": {
+    "wrangler": "4.114.0"
+  }
+}

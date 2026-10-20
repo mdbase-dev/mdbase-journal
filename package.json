@@ -12,7 +12,8 @@
     "manifest": "node scripts/build-manifest.mjs",
     "icons": "node scripts/icons.mjs",
     "dev": "python3 -m http.server -d public 8765",
-    "test": "node scripts/test.mjs"
+    "test": "node scripts/test.mjs",
+    "test:publisher": "node --test tests/native-publish-bytes.test.mjs tests/native-publisher-policy.test.mjs tests/native-originals.test.mjs tests/native-artifact.test.mjs tests/native-hosting.test.mjs tests/native-tag.test.mjs tests/native-tool.test.mjs"
   },
   "dependencies": {
     "@mdbase-dev/connect-protocol": "file:vendor/mdbase-dev-connect-protocol-0.1.0-beta.129-c280cd194ffd.tgz",
