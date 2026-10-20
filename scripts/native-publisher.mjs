@@ -60,7 +60,7 @@ export async function captureDeployment({output,target,sha,accountId,apiToken,fe
  need(/^[a-f0-9]{32}$/.test(accountId??'') && apiToken,'existing account credentials required');
  const prefix=deploymentPrefix(output),url=`https://${prefix}.mdbase-journal.pages.dev`;
  const branch=journalDeploymentFor({MDBASE_ENV:target}).branch;
- const response=await fetchImpl(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/pages/projects/mdbase-journal/deployments?per_page=100`,{redirect:'error',signal:AbortSignal.timeout(30000),headers:{Authorization:`Bearer ${apiToken}`}});
+ const response=await fetchImpl(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/pages/projects/mdbase-journal/deployments?per_page=20`,{redirect:'error',signal:AbortSignal.timeout(30000),headers:{Authorization:`Bearer ${apiToken}`}});
  need(response.ok,'deployment UUID lookup failed');
  const body=await response.json();
  const matches=body.success && Array.isArray(body.result)?body.result.filter(d=>d.url===url && d.deployment_trigger?.metadata?.commit_hash===sha && d.deployment_trigger?.metadata?.branch===branch):[];

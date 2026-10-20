@@ -97,10 +97,10 @@ test('existing Ops project ID is NOT an account ID; lookup checks exact UUID/nam
 });
 test('capture resolves real UUID against uploaded URL/source/exact Pages channel, not URL prefix',async()=>{
  const output='https://12345678.mdbase-journal.pages.dev',valid={success:true,result:[{id:uuid,url:output,deployment_trigger:{metadata:{commit_hash:sha,branch:'staging'}}}]};
- const options={output,target:'staging',sha,accountId:'a'.repeat(32),apiToken:'UNIT mock',fetchImpl:async()=>Response.json(valid)};
- assert.equal(deploymentPrefix(output),'12345678');assert.equal((await captureDeployment(options)).id,uuid);
+ const options={output,target:'staging',sha,accountId:'a'.repeat(32),apiToken:'UNIT mock',fetchImpl:async url=>{assert.equal(url,`https://api.cloudflare.com/client/v4/accounts/${'a'.repeat(32)}/pages/projects/mdbase-journal/deployments?per_page=20`);return Response.json(valid);}};
+ assert.equal(deploymentPrefix(output),'12345678');assert.deepEqual(await captureDeployment(options),{id:uuid,url:output,sourceSha:sha,pagesBranch:'staging'});
  assert.throws(()=>deploymentPrefix(output+' https://87654321.mdbase-journal.pages.dev'),/unambiguous/);
- for(const patch of [{id:'12345678'},{deployment_trigger:{metadata:{commit_hash:'b'.repeat(40),branch:'staging'}}},{deployment_trigger:{metadata:{commit_hash:sha,branch:'main'}}}])await assert.rejects(captureDeployment({...options,fetchImpl:async()=>Response.json({success:true,result:[{...valid.result[0],...patch}]})}),/actual deployment UUID/);
+ for(const patch of [{id:'12345678'},{url:'https://87654321.mdbase-journal.pages.dev'},{deployment_trigger:{metadata:{commit_hash:'b'.repeat(40),branch:'staging'}}},{deployment_trigger:{metadata:{commit_hash:sha,branch:'main'}}}])await assert.rejects(captureDeployment({...options,fetchImpl:async()=>Response.json({success:true,result:[{...valid.result[0],...patch}]})}),/actual deployment UUID/);
 });
 test('failed receipts retain source/tree/run/artifact/inventory/digests/UUID and never infer admission',()=>{
  const f=fixture();
