@@ -137,18 +137,37 @@ export async function download(expected, root, transport = fetch) {
     const chunks=[]; let size=0;stage='zip-read';
     for await (const chunk of blob.body) { size+=chunk.length; requireValue(size<=512*1024*1024,'archive size'); chunks.push(chunk); }
     const bytes=Buffer.concat(chunks),downloadedSha256=sha(bytes);
-    await remember('downloadedSha256',downloadedSha256);
-    stage='zip-digest-validation';requireValue(`sha256:${downloadedSha256}` === expected.digest,'download digest');
-    stage='zip-write';await mkdir(root,{recursive:true});
-    const zip=join(root,'../journal-native.zip'); await writeFile(zip,bytes,{flag:'wx'});
-    // Validate ALL names/modes before extracting; no archive scripts or links.
-    stage='zip-extraction';execFileSync('python3',['-B',fileURLToPath(new URL('./artifact-zip.py',import.meta.url)),zip,root]);
-    stage='after-metadata-fetch';const after = await get(`/actions/artifacts/${expected.id}`,'afterResponse','artifact');
-    await remember('after',publicMetadata(after,'artifact'));
-    stage='after-metadata-validation';assertArtifactMetadata(after,expected);
-    stage='after-run-fetch';const runAfter = await get(`/actions/runs/${expected.run}`,'runAfterResponse','run');
-    await remember('runAfter',publicMetadata(runAfter,'run'));
-    stage='after-run-validation';assertArtifactRun(runAfter,expected);
+    // COMPLETE actual ZIP identity, together on disk BEFORE comparison/NEXT.
+    // Never metadata/header lengths, nor the identity of an incomplete prefix.
+    Object.assign(observed,{downloadedSha256,downloadedBytes:bytes.length});await persist();
+    const failures=[];
+    const retainFailure=async(error)=>{
+      failures.push({stage,reason:error instanceof ArtifactRefusal?error.reason:'operation-failed'});
+      observed.failure=failures[0];
+      if(failures.length>1)observed.secondaryFailures=failures.slice(1);
+      await persist();
+    };
+    const zip=join(root,'../journal-native.zip');
+    try {
+      stage='zip-digest-validation';requireValue(`sha256:${downloadedSha256}` === expected.digest,'download digest');
+      stage='zip-write';await mkdir(root,{recursive:true});await writeFile(zip,bytes,{flag:'wx'});
+      // Validate ALL names/modes before extracting; no archive scripts or links.
+      stage='zip-extraction';execFileSync('python3',['-B',fileURLToPath(new URL('./artifact-zip.py',import.meta.url)),zip,root],{stdio:'pipe'});
+    } catch(error) {await retainFailure(error);}
+    // A COMPLETE download requires BOTH independent post observations even on
+    // digest/write/extraction/AFTER refusal. Exactly one lookup each, no retry.
+    // Preserve the first failure; later failures are fixed safe classifications.
+    for(const [slot,path,kind,validate,fetchStage,validationStage] of [
+      ['after',`/actions/artifacts/${expected.id}`,'artifact',assertArtifactMetadata,'after-metadata-fetch','after-metadata-validation'],
+      ['runAfter',`/actions/runs/${expected.run}`,'run',assertArtifactRun,'after-run-fetch','after-run-validation']
+    ]) {
+      try {
+        stage=fetchStage;const value=await get(path,slot+'Response',kind);
+        await remember(slot,publicMetadata(value,kind));
+        stage=validationStage;validate(value,expected);
+      } catch(error) {await retainFailure(error);}
+    }
+    if(failures.length){stage=failures[0].stage;throw new ArtifactRefusal(failures[0].reason);}
     stage='post-download-digest';requireValue(sha(await readFile(zip)) === expected.digest.slice(7), 'post-download archive digest');
     stage='artifact-directory';await assertArtifactDirectory(root,expected);
     // Metadata and actual ZIP digest remain outside the immutable upload tree.

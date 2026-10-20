@@ -159,9 +159,16 @@ The qualified artifact action still requires success; its ID/digest outputs are
 unchanged. A failed build still skips the protected upload job entirely.
 
 Artifact transport persists each observed public validation-identity response
-before validation or the next fallible lookup: before/run/ZIP SHA/after/runAfter.
-The first failed lookup retains expected identity only; missing responses are
-not invented. Fixed refusal stage/reason replace raw transport errors. Headers,
+before comparison/validation or NEXT: before/run/COMPLETE actual ZIP SHA256 AND
+stream byte length together/after/runAfter. BOTH post-download observations are
+attempted independently exactly once after a complete bounded ZIP, even on digest,
+exclusive-write, extraction or AFTER refusal. First failure remains primary;
+secondary failures retain only fixed stage/reason classifications. No opaque
+errors, metadata/header-derived ZIP length, incomplete-prefix identity or fabricated
+posts. Initial lookup/incomplete redirect/ZIP-body failures never invent completed
+ZIP facts. The real first CI receipt's missing actual ZIP length remains missing
+historical evidence; happy-path AFTER/runAfter success did NOT prove these failure
+paths. Fixed refusal stage/reason replace raw transport errors. Headers,
 credentials, signed blob URLs and unrelated API-response fields are not retained.
 HTTP evidence additionally persists numeric status before reading the body, then
 bounded public body identity/error fields and its captured-byte length/SHA before
