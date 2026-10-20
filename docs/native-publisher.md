@@ -1,7 +1,12 @@
 # Native Journal publisher — source only
 
-This NEW workflow is unregistered. Co approved a native-tag bootstrap, **not a
-main merge to register dispatch**. Nothing here creates tags, resources, policies,
+The exact native-tag bootstrap SUCCEEDED in real push run39398656261/attempt1
+at b9a812d, without a default-main merge or dispatch registration. That run's
+build and official Wrangler4.114 install succeeded; protected comparison then
+failed on one CLI-added inventory LF BEFORE project/upload. Its failed receipts
+remain immutable evidence, not a publication/admission result. No retry/tag edit
+or fresh operational run is authorized by this source-only fix.
+Nothing here creates tags, resources, policies,
 credentials or production authority. Existing LAB `deploy:lab`, project/profile,
 retained LAB0ec originals and actual `runtime-lab.wasm` metadata remain unchanged.
 Root NPM now pins the independently approved STAGING SDK eaa4e697 original; approved
@@ -131,6 +136,17 @@ pending-deployments API, approval hash or machine approval substitute.
    current-HEAD guard and sole `pages deploy --no-bundle`, in a config/Functions-
    free TEMP cwd. Post-upload inventory assertion gates served verification.
 
+### Exact inventory serialization
+
+Artifact inventory and protected CLI stdout use ONE source-owned serializer:
+UTF-8, two-space `JSON.stringify`, **NO trailing LF**. This preserves the actual
+first552-file artifact's84537 bytes/SHA d7af. The CLI uses `process.stdout.write`,
+not `console.log`'s additional LF. Source plans retain their original newline
+contract. Strict shell `cmp` is unchanged: no trim/fuzzy JSON equality, reordering,
+file exclusion or changed inventory data. Saved CI originals are never rewritten.
+The real successful dedicated installer supersedes the historical local offline
+cache miss as a current operational install blocker; old evidence remains intact.
+
 ### Failure evidence before a qualified artifact exists
 
 Before original intake or candidate execution the unprivileged job records only
@@ -143,9 +159,16 @@ The qualified artifact action still requires success; its ID/digest outputs are
 unchanged. A failed build still skips the protected upload job entirely.
 
 Artifact transport persists each observed public validation-identity response
-before validation or the next fallible lookup: before/run/ZIP SHA/after/runAfter.
-The first failed lookup retains expected identity only; missing responses are
-not invented. Fixed refusal stage/reason replace raw transport errors. Headers,
+before comparison/validation or NEXT: before/run/COMPLETE actual ZIP SHA256 AND
+stream byte length together/after/runAfter. BOTH post-download observations are
+attempted independently exactly once after a complete bounded ZIP, even on digest,
+exclusive-write, extraction or AFTER refusal. First failure remains primary;
+secondary failures retain only fixed stage/reason classifications. No opaque
+errors, metadata/header-derived ZIP length, incomplete-prefix identity or fabricated
+posts. Initial lookup/incomplete redirect/ZIP-body failures never invent completed
+ZIP facts. The real first CI receipt's missing actual ZIP length remains missing
+historical evidence; happy-path AFTER/runAfter success did NOT prove these failure
+paths. Fixed refusal stage/reason replace raw transport errors. Headers,
 credentials, signed blob URLs and unrelated API-response fields are not retained.
 HTTP evidence additionally persists numeric status before reading the body, then
 bounded public body identity/error fields and its captured-byte length/SHA before

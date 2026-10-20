@@ -57,6 +57,90 @@ function transport(bytes,{after=meta,runAfter=run,actualMeta=meta,initialRun=run
   return Response.json(++metas===1?actualMeta:after);
  };
 }
+// R7: observe the existing transport rather than cloning its API implementation.
+// The body is always a tiny UNIT ZIP, never an SDK/product archive.
+for(const badDigest of [false,true])test('complete ZIP actual SHA AND actual byte length persist before next lookup '+(badDigest?'even on bad digest':'on success'),async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-zip-identity-'));t.after(()=>rm(parent,{recursive:true,force:true}));
+ const bytes=zip(Object.entries(await files()).map(([p,b])=>[p,b,0o100644])),digest=badDigest?expected.digest:'sha256:'+hash(bytes),m={...meta,digest,size_in_bytes:999999};
+ const mock=transport(bytes,{actualMeta:m,after:m});let metas=0,runs=0,snapshot;
+ const observed=async(url,init)=>{
+  const u=String(url);
+  if(u.includes('/actions/artifacts/') && !u.endsWith('/zip') && ++metas===2)snapshot=JSON.parse(await readFile(join(parent,'artifact-metadata.json')));
+  if(u.includes('/actions/runs/'))runs++;
+  const response=await mock(url,init);if(u==='https://blob.fixture/archive.zip')response.headers.set('content-length','1');return response;
+ };
+ if(badDigest)await assert.rejects(download({...expected,digest},join(parent,'artifact'),observed),/download digest/);
+ else await download({...expected,digest},join(parent,'artifact'),observed);
+ const evidence=JSON.parse(await readFile(join(parent,'artifact-metadata.json')));
+ assert.equal(evidence.downloadedBytes,bytes.length,'actual complete stream length, never metadata/header size');assert.equal(evidence.downloadedSha256,hash(bytes));
+ assert.equal(metas,2);assert.equal(runs,2);assert.equal(snapshot.downloadedBytes,bytes.length);assert.equal(snapshot.downloadedSha256,hash(bytes));
+ assert.equal(evidence.after.id,42);assert.equal(evidence.runAfter.run_attempt,2);
+ if(badDigest){assert.equal(evidence.failure.stage,'zip-digest-validation');await assert.rejects(readFile(join(parent,'journal-native.zip')),{code:'ENOENT'});}
+ else assert(!Object.hasOwn(evidence,'failure'));
+});
+for(const localFailure of ['digest','extraction'])test('primary '+localFailure+' refusal still captures BOTH post-download attempts and safe secondary failures',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-post-refusal-'));t.after(()=>rm(parent,{recursive:true,force:true}));
+ const entries=localFailure==='extraction'?[['../escape','UNIT-private-body',0o100644]]:Object.entries(await files()).map(([p,b])=>[p,b,0o100644]);
+ const bytes=zip(entries),digest=localFailure==='digest'?expected.digest:'sha256:'+hash(bytes),m={...meta,digest};
+ const mock=transport(bytes,{actualMeta:m,after:{...m,id:43},runAfter:{...run,run_attempt:3}});let metas=0,runs=0;
+ await assert.rejects(download({...expected,digest},join(parent,'artifact'),async(url,init)=>{
+  const u=String(url);
+  if(u.includes('/actions/artifacts/') && !u.endsWith('/zip') && ++metas===2 && localFailure==='extraction')return Response.json({message:'Forbidden',token:'UNIT-private-token'},{status:403});
+  if(u.includes('/actions/runs/') && ++runs===2 && localFailure==='digest')throw Error('UNIT-private-opaque https://blob.fixture/?sig=UNIT-private-SAS');
+  return mock(url,init);
+ }));
+ const text=await readFile(join(parent,'artifact-metadata.json'),'utf8'),e=JSON.parse(text);
+ assert.equal(e.failure.stage,localFailure==='digest'?'zip-digest-validation':'zip-extraction');assert.equal(e.failure.reason,localFailure==='digest'?'download digest':'operation-failed');
+ assert.deepEqual(e.secondaryFailures,localFailure==='digest'?[{stage:'after-metadata-validation',reason:'immutable ID/digest'},{stage:'after-run-fetch',reason:'operation-failed'}]:[{stage:'after-metadata-fetch',reason:'GitHub metadata unavailable'},{stage:'after-run-validation',reason:'run attempt/event/ref/workflow/repository'}]);
+ assert.equal(metas,2);assert.equal(runs,2);assert.equal(e.downloadedSha256,hash(bytes));assert.equal(e.downloadedBytes,bytes.length);
+ if(localFailure==='digest'){assert.equal(e.after.id,43);assert(!Object.hasOwn(e,'runAfter'));}
+ else {assert.equal(e.afterResponse.status,403);assert.equal(e.runAfter.run_attempt,3);assert.deepEqual(await inventoryDirectory(join(parent,'artifact')),[]);}
+ assert(!text.includes('UNIT-private'));assert(!text.includes('sig='));
+});
+for(const afterFailure of ['identity','http'])test('AFTER '+afterFailure+' refusal still independently fetches and retains runAfter exactly ONCE',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-independent-post-'));t.after(()=>rm(parent,{recursive:true,force:true}));
+ const bytes=zip(Object.entries(await files()).map(([p,b])=>[p,b,0o100644])),digest='sha256:'+hash(bytes),m={...meta,digest};
+ const mock=transport(bytes,{actualMeta:m,after:{...m,id:43}});let metas=0,runs=0,snapshot;
+ await assert.rejects(download({...expected,digest},join(parent,'artifact'),async(url,init)=>{
+  const u=String(url);
+  if(u.includes('/actions/artifacts/') && !u.endsWith('/zip') && ++metas===2 && afterFailure==='http')return Response.json({message:'Forbidden'},{status:403});
+  if(u.includes('/actions/runs/') && ++runs===2)snapshot=JSON.parse(await readFile(join(parent,'artifact-metadata.json')));
+  return mock(url,init);
+ }));
+ const e=JSON.parse(await readFile(join(parent,'artifact-metadata.json')));
+ assert.equal(metas,2);assert.equal(runs,2);assert.equal(e.runAfter.run_attempt,2);assert.equal(e.runAfterResponse.status,200);
+ assert.equal(e.failure.stage,afterFailure==='identity'?'after-metadata-validation':'after-metadata-fetch');assert.deepEqual(snapshot.failure,e.failure);
+ assert.equal(snapshot.afterResponse.status,afterFailure==='identity'?200:403);assert.equal(e.downloadedBytes,bytes.length);
+ assert(!Object.hasOwn(e,'secondaryFailures'));
+});
+test('first AFTER failure remains primary when independent runAfter also refuses identity',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-both-post-'));t.after(()=>rm(parent,{recursive:true,force:true}));
+ const bytes=zip(Object.entries(await files()).map(([p,b])=>[p,b,0o100644])),digest='sha256:'+hash(bytes),m={...meta,digest};
+ await assert.rejects(download({...expected,digest},join(parent,'artifact'),transport(bytes,{actualMeta:m,after:{...m,id:43},runAfter:{...run,run_attempt:3}})),/immutable ID\/digest/);
+ const e=JSON.parse(await readFile(join(parent,'artifact-metadata.json')));
+ assert.equal(e.failure.stage,'after-metadata-validation');assert.equal(e.after.id,43);assert.equal(e.runAfter.run_attempt,3);
+ assert.deepEqual(e.secondaryFailures,[{stage:'after-run-validation',reason:'run attempt/event/ref/workflow/repository'}]);
+});
+test('ZIP exclusive-write failure keeps its primary reason and still retains BOTH post observations',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-zip-write-'));t.after(()=>rm(parent,{recursive:true,force:true}));
+ const bytes=zip(Object.entries(await files()).map(([p,b])=>[p,b,0o100644])),digest='sha256:'+hash(bytes),m={...meta,digest};
+ await writeFile(join(parent,'journal-native.zip'),'existing DATA, never overwrite');
+ await assert.rejects(download({...expected,digest},join(parent,'artifact'),transport(bytes,{actualMeta:m,after:m})),/zip-write: operation-failed/);
+ const e=JSON.parse(await readFile(join(parent,'artifact-metadata.json')));assert.equal(e.after.id,42);assert.equal(e.runAfter.run_attempt,2);assert.equal(e.downloadedBytes,bytes.length);
+ assert.equal(await readFile(join(parent,'journal-native.zip'),'utf8'),'existing DATA, never overwrite');
+});
+test('incomplete ZIP stream never invents full SHA/length or post-download observations',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-partial-zip-'));t.after(()=>rm(parent,{recursive:true,force:true}));
+ const mock=transport(Buffer.alloc(0));let metas=0,runs=0,pulls=0;
+ await assert.rejects(download(expected,join(parent,'artifact'),async(url,init)=>{
+  const u=String(url);if(u.includes('/actions/artifacts/') && !u.endsWith('/zip'))metas++;if(u.includes('/actions/runs/'))runs++;
+  if(u==='https://blob.fixture/archive.zip')return new Response(new ReadableStream({pull(c){if(++pulls===1)c.enqueue(Buffer.from('UNIT-private-prefix'));else c.error(Error('UNIT-private-stream'));}}),{headers:{'content-length':'100'}});
+  return mock(url,init);
+ }));
+ const text=await readFile(join(parent,'artifact-metadata.json'),'utf8'),e=JSON.parse(text);
+ for(const key of ['downloadedSha256','downloadedBytes','after','runAfter','afterResponse','runAfterResponse'])assert(!Object.hasOwn(e,key));
+ assert.equal(metas,1);assert.equal(runs,1);assert.equal(e.failure.stage,'zip-read');assert(!text.includes('UNIT-private'));
+});
 test('actual ZIP digest checked before extraction, metadata/run rebound after, safe download succeeds',async t=>{
  const parent=await mkdtemp(join(tmpdir(),'journal-download-'));t.after(()=>rm(parent,{recursive:true,force:true}));
  const bytes=zip(Object.entries(await files()).map(([path,body])=>[path,body,0o100644]));
@@ -81,7 +165,7 @@ for(const [label,body,expectedTruncated] of [
  const text=await readFile(join(parent,'artifact-metadata.json'),'utf8'),evidence=JSON.parse(text);
  assert.equal(evidence.zipResponse.status,302);assert.equal(evidence.zipResponse.bodyComplete,false);assert.equal(evidence.zipResponse.bodyTruncated,expectedTruncated);
  assert.equal(evidence.failure.stage,'zip-redirect-validation');assert.equal(evidence.failure.reason,'bounded archive redirect body');
- assert(!Object.hasOwn(evidence,'blobResponse'));assert(!Object.hasOwn(evidence,'downloadedSha256'));assert(!text.includes('UNIT-private'));
+ assert(!Object.hasOwn(evidence,'blobResponse'));assert(!Object.hasOwn(evidence,'downloadedSha256'));assert(!Object.hasOwn(evidence,'downloadedBytes'));assert(!text.includes('UNIT-private'));
  await assert.rejects(readFile(join(parent,'journal-native.zip')),{code:'ENOENT'});
 });
 test('complete non-JSON ZIP redirect body permits the same verified download',async t=>{

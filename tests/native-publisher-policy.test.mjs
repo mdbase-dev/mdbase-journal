@@ -1,11 +1,47 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 const source = path => readFile(new URL('../'+path,import.meta.url),'utf8');
+test('actual first CI552 inventory fixes the canonical byte contract, including NO final LF',async()=>{
+ const bytes=await readFile(new URL('fixtures/native-first-ci-journal-inventory.json',import.meta.url));
+ assert.equal(bytes.length,84537);assert.equal(createHash('sha256').update(bytes).digest('hex'),'d7afbc476f99855df80cfd349ab947e85f286562c2f48a04bfa8c2ec7f2d47fd');
+ assert.equal(JSON.parse(bytes).length,552);assert.equal(bytes.at(-1),0x5d);
+ // Original producer serialization, not trim/JSON-equality as a replacement
+ // for the protected shell cmp. Original GHA evidence is never rewritten.
+ assert.deepEqual(Buffer.from(JSON.stringify(JSON.parse(bytes),null,2)),bytes);
+ const {serializeInventory}=await import('../scripts/native-publisher.mjs');
+ assert.deepEqual(Buffer.from(serializeInventory(JSON.parse(bytes))),bytes);
+ const writer=await source('scripts/native-build.mjs');
+ assert(writer.includes("await writeFile(join(output,'inventory.json'),serializeInventory(await publicationInventory(publish,plan)));"),'Artifact writer must use the SAME canonical serializer, with no suffix');
+});
+test('protected inventory CLI shell redirection and strict cmp match artifact writer bytes for ALL regular files',async t=>{
+ const {headersPolicy,redirectsPolicy}=await import('../scripts/native-hosting.mjs');
+ const {inventoryDirectory}=await import('../scripts/lib/native-publish-bytes.mjs');
+ const dir=await mkdtemp(join(tmpdir(),'journal-inventory-cli-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const publish=join(dir,'publish'),origin='https://staging.mdbase-journal.pages.dev',hash=b=>createHash('sha256').update(b).digest('hex');
+ // Static DATA, including deliberately nonexecuted JS. Not an SDK/app build,
+ // GitHub ref emulation, publication artifact or authentication descriptor.
+ const files={'index.html':'Journal','404.html':'Missing','journal.js':'throw Error("app must not execute");','sdk/application/sdk.js':'throw Error("SDK must not execute");','sdk/application/worker.js':'static worker data','sdk/application/packaged-trust.js':'original fixture trust data','sdk/native/runtime.wasm':'native data','sdk/native/sqlite3.wasm':'SQLite data','sdk/native/sqlite3.js':'SQLite JS data','mdbase-shell-sw.js':'static SW data','mdbase-shell-runtime.js':'static shell runtime','mdbase-shell-register.js':'static register','.hidden':'hidden data','_noncache':'underscore data','extra.map':'non-cache data','_headers':headersPolicy,'_redirects':redirectsPolicy,
+  '.well-known/mdbase-app.json':JSON.stringify({manifest_version:1,id:'dev.mdbase.journal-prototype',homepage:origin+'/',redirect_uris:[origin+'/auth/mdbase/callback'],installation_origins:{staging:{'app-runtime':[origin]}}})};
+ for(const [path,body] of Object.entries(files)){await mkdir(dirname(join(publish,path)),{recursive:true});await writeFile(join(publish,path),body);}
+ const plan={target:'staging',origin,sdkTrust:{nativeAssets:Object.fromEntries(['runtime.wasm','sqlite3.wasm','sqlite3.js'].map(name=>[name,{bytes:Buffer.byteLength(files['sdk/native/'+name]),sha256:hash(files['sdk/native/'+name])}])),trustModuleSha256:hash(files['sdk/application/packaged-trust.js'])}};
+ const planPath=join(dir,'source-plan.json'),artifactPath=join(dir,'inventory.json'),revalidated=join(dir,'revalidated-inventory.json');
+ const planBytes=Buffer.from(JSON.stringify(plan,null,2)+'\n');await writeFile(planPath,planBytes);
+ const inventory=await inventoryDirectory(publish),canonical=Buffer.from(JSON.stringify(inventory,null,2));await writeFile(artifactPath,canonical);
+ const cli=fileURLToPath(new URL('../scripts/native-publisher.mjs',import.meta.url));
+ execFileSync('bash',['-euo','pipefail','-c','"$1" "$2" inventory "$3" "$4" > "$5"; cmp "$6" "$5"','inventory-contract',process.execPath,cli,publish,planPath,revalidated,artifactPath],{env:{PATH:'/usr/bin:/bin',HOME:dir,TMPDIR:dir},stdio:'pipe'});
+ assert.deepEqual(await readFile(revalidated),canonical);assert.deepEqual(await readFile(planPath),planBytes);
+ assert.equal(JSON.parse(await readFile(revalidated)).length,Object.keys(files).length);
+ // Same JSON plus LF must STILL fail strict cmp: no fuzzy equality/trim fix.
+ await writeFile(revalidated,Buffer.concat([canonical,Buffer.from('\n')]));
+ assert.throws(()=>execFileSync('cmp',[artifactPath,revalidated],{stdio:'pipe'}));
+ const s=await source('scripts/native-publisher.mjs');assert(s.includes("if(command==='guard')console.log(JSON.stringify(await sourcePlan({installed:args.includes('--installed')}),null,2));"),'Plan newline contract stays unchanged');
+});
 test('shared byte helper remains byte exact',async()=>{
  assert.equal(createHash('sha256').update(await source('scripts/lib/native-publish-bytes.mjs')).digest('hex'),'a4336258cea726285573e9e667bba1c1ad6797fdba331715d0f17ea67ea5c66a');
 });
