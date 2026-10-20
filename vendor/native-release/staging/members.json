@@ -581,8 +581,8 @@
   },
   {
     "path": "dist/files.js",
-    "bytes": 20239,
-    "sha256": "313d07424d8c50b0de163d336898d304d0bf9ac207c05332824121cb0b254df2"
+    "bytes": 22783,
+    "sha256": "a11f7d41e022d3a70ebecf9bd547530e08fa7904e798129a2e3e5262e7df5d10"
   },
   {
     "path": "node_modules/@mdbase-dev/connect-protocol/dist/files.js",
@@ -876,13 +876,13 @@
   },
   {
     "path": "dist/browser/mdbase-sdk.js",
-    "bytes": 2116734,
-    "sha256": "f9ed38c8bdc589642d92a35762ab86f5d01e3713c9fb1940f36235785f2868cc"
+    "bytes": 2118676,
+    "sha256": "111251e02b1dd2d4ae62816bc74b681fedae992435fae595c6f74911342d21b1"
   },
   {
     "path": "dist/browser/mdbase-sdk.min.js",
-    "bytes": 1090060,
-    "sha256": "3c492769c697018834d501d712342001c0862c26bb44519a2ea378449351a202"
+    "bytes": 1090501,
+    "sha256": "d9c4b7336030bed7bfe5781d3e6d990cb6cb02321c2bd27b7fe7a20b18f64f37"
   },
   {
     "path": "dist/testing/memory-contracts.js",
@@ -1806,8 +1806,8 @@
   },
   {
     "path": "dist/application/worker.js",
-    "bytes": 1404550,
-    "sha256": "5c4f5c355548f45b3c3dfa628e4dba662c343dac8a4affd08891f9b9ac75b246"
+    "bytes": 1406184,
+    "sha256": "3c236c0c08b6e10953d50e82daaf1f55cd509fa7dddd30f7d1f914b4e6425b4e"
   },
   {
     "path": "dist/write-ledger.js",
@@ -2286,8 +2286,8 @@
   },
   {
     "path": "dist/files.js.map",
-    "bytes": 19793,
-    "sha256": "0e80e579f561959ce1524a7f02c26b6a8f06a7130bebe18e9e1218904e7f059b"
+    "bytes": 21295,
+    "sha256": "6c55dab2f45750a35a160f60eaefc35359e9a245d74f6d00de565000c3f33df2"
   },
   {
     "path": "dist/app-host/foreground-wake.js.map",
@@ -3426,8 +3426,8 @@
   },
   {
     "path": "dist/files.d.ts",
-    "bytes": 6348,
-    "sha256": "a01ecd7c5defdd3948ed4dd7b8768b4d9ce8feb2ab1a78e1f9297a96f966e8a9"
+    "bytes": 6526,
+    "sha256": "526a7ba53dbb39fab6cee2cb1054e625fb1937e6ab3a22d9db9721ef6f04f922"
   },
   {
     "path": "node_modules/@mdbase-dev/connect-protocol/dist/files.d.ts",

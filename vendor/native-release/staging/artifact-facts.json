@@ -1,10 +1,10 @@
 {
-  "source": "a3023aee3731dcbf9de19a41918a84cfb3ae7193",
-  "sourceTree": "c50479b5641c11a2750ec8b9cefdb433e5285d10",
-  "archive": "sdk-dev-a3023aee-staging.tgz",
-  "bytes": 4460029,
-  "sha256": "c0bc377606df159d03c668923b7626f31459a1750ae0db033bb42789532c7296",
-  "sri": "sha512-qfffKwUwtscEXqEznldlQPZ53pljDtnd4aIrB0sqs+AEV8L9Uyhc7RFfpevu8WS5EnT69TZw24R/KH9Jmi6S8g==",
+  "source": "eaa4e697fc1198f32fc3714f377342a24c56d985",
+  "sourceTree": "71ddecbca5dd54b5153d6bcd500cc89ce189474e",
+  "archive": "sdk-dev-eaa4e697-staging.tgz",
+  "bytes": 4461608,
+  "sha256": "15eb64b50fc7c2809ff3dba9cce5104fe48d8592208b3af8acb529862a1af18c",
+  "sri": "sha512-OZcexDhkjwROq0pSf/rSV1aU9H2AArhB5S2/UQU4ZTYMqJz7mpOhSFznZKSjDh6nb4EVROvBS926O3+HUePbjA==",
   "members": 896,
   "originalNpmPackNoMemberRewrite": true,
   "originalMembersAndBundledProtocolVerified": true,
@@ -62,11 +62,17 @@
   "nativeBytes": 3676583,
   "nativeQualification": "accepted original integrity-pinned, not separately signed",
   "qualification": {
-    "automaticSdkPrCi": 39366625794,
-    "qualifiedSdkHead": "64e1e284e8e567cc382018b4106091e207f59db4",
-    "actualSdkMerge": "a3023aee3731dcbf9de19a41918a84cfb3ae7193",
-    "acceptedNative": "original ProductA942",
-    "authorization": "Co03:58:07 staging SDK assignment + NXtrust05:40:18 COMPLETE custody/readback handoff"
+    "pr": 944,
+    "soleAutomaticCi": 39383342511,
+    "attempt": 1,
+    "ciConclusion": "success",
+    "ciCompletedAt": "2026-10-20T07:05:09Z",
+    "qualifiedSdkHead": "e42dd61406051a4a9a8d1569bf1cd9a7c37988c7",
+    "actualSdkMerge": "eaa4e697fc1198f32fc3714f377342a24c56d985",
+    "actualMergedAt": "2026-10-20T07:17:29Z",
+    "qualifiedAndMergedWholeTreeEqual": true,
+    "apiReview": "Co06:58:27 APPROVED / normal selfmerge on green",
+    "authorization": "Co06:38:30 ONE replacement LAB +ONE replacement STAGING after real repro/qualified merge"
   },
   "authenticationEvidence": {
     "handoff": ".coord/scratch/nx-trust/beta134-staging-custody-handoff.md",
@@ -92,7 +98,7 @@
     "recoveryMode": "forward-only",
     "bookkeepingNotNewGate": true
   },
-  "trustReceiptPurpose": "NEW staging context+qualified verifier binding ONLY; NOT authentication anchor/native signing/managed admission",
+  "trustReceiptPurpose": "UNCHANGED accepted same-target context+verifier binding ONLY; not old/new SDK/native signing/auth/admission",
   "trustClockOverride": false,
   "normalBuildAndPackOnly": true,
   "additionalQualificationOrConsumerTests": false,

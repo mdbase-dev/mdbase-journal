@@ -4,19 +4,28 @@ This NEW workflow is unregistered. Co approved a native-tag bootstrap, **not a
 main merge to register dispatch**. Nothing here creates tags, resources, policies,
 credentials or production authority. Existing LAB `deploy:lab`, project/profile,
 retained LAB0ec originals and actual `runtime-lab.wasm` metadata remain unchanged.
-Root NPM now pins the independently approved STAGING SDK a302 original; approved
+Root NPM now pins the independently approved STAGING SDK eaa4e697 original; approved
 UI9553 and protocol129c280 pins/originals remain unchanged.
 
-## Current candidate HOLD (Co/owner follow-up)
+## Qualified replacement intake (Co072350 resume)
 
-The committed c0bc/a302 STAGING original and its completed local consumer output
-are **historical custody/compatibility proof only**, not the latest/final SDK
-candidate or app readiness. NX-TNAPP owns the newly reported strict public-wire
-SDK fixes and sole replacement producer work after qualified merge. No replacement
-original/facts/SHA is READY here. Hold further c0bc product builds/publication;
-wait for independent owner originals before final target intake/one causal build.
-Never rewrite old c0bc/8c2f archives, guess replacement identity, patch/repack SDK,
-reauthenticate or infer native admission/production GO.
+TNAPP072304 delivered the actual PR944 merged SDK eaa4e697 original after sole
+qualified CI39383342511/attempt1. Co072350 superseded the earlier HOLD for one
+causal local STAGING consumer build. The original is4461608 bytes, SHA256
+`15eb64b50fc7c2809ff3dba9cce5104fe48d8592208b3af8acb529862a1af18c`;
+FRESH4746-byte public facts SHA256
+`d54aef71521ab3561bd9a81cd1303410a3fde29f8fbd35a1e0041e58d0569de3`
+is pinned BEFORE parsing/candidate execution, never mixed with old d313 facts.
+The context/verifier receipt is intentionally byte-identical and UNSIGNED: it
+binds the unchanged context/helper, neither SDK source nor native bytes. No new
+authentication, SDK/native/helper build, pack, publication or admission follows.
+
+Old c0bc/a302 archive, packet and d5cc552-file/198-offline historical output remain
+immutable and attributed to their original source. The complete old packet is
+also retained under `vendor/native-release/historical/a3023aee-staging/`.
+Never rewrite/relabel old originals or transfer old app qualification. No LAB
+slot intake or SDK patch here. Native acceptance and production GO remain owed;
+local source/build checks cannot create those authorities.
 
 ## Authority and original intake
 
@@ -60,8 +69,9 @@ not a basename alias. Actual facts environment/trust/handoff/verifier/module
 hash must agree with original provenance/module; producer informational booleans
 are never authentication gates.
 Missing/noncanonical target originals refuse; LAB never becomes staging by an
-origin/environment flag. TNAPP's actual STAGING SDK a3023aee is READY (05:48 owner handoff;
-NXtrust authentication/readback05:38), with parent-preserved original custody.
+origin/environment flag. TNAPP's actual replacement STAGING SDK eaa4e697 is READY,
+with parent-preserved independent original custody (NXtrust's same accepted
+STAGING authentication/readback, no reauthentication).
 Journal's separately authorized target intake now commits that original plus its
 byte-verbatim public packet and minimal frozen NPM SDK pin/integrity changes.
 The approved per-app UI stays ORIGINAL9553 (85693 bytes, SHA256
