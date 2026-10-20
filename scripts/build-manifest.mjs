@@ -2,11 +2,15 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { defineTypePack } from "@mdbase-dev/connect-dev";
+// Validate with the canonical connect-protocol Journal already pins and the
+// SDK packet bundles. connect-dev's nested older protocol predates
+// installation_origins and rejects staging/production manifests outright.
 import {
-  defineTypePack,
-  formatValidationIssues,
+  formatManifestValidationIssues as formatValidationIssues,
   validateAppManifest
-} from "@mdbase-dev/connect-dev";
+} from "@mdbase-dev/connect-protocol/manifest";
+import { JOURNAL_DEPLOYMENT_TARGETS, journalInstallationOrigins } from "./deployment-environment.mjs";
 
 /**
  * Builds `public/.well-known/mdbase-app.json` from the readable sources in `pack/`.
@@ -21,7 +25,20 @@ export const DEFAULT_JOURNAL_ORIGIN = "https://mdbase-journal.callum-artifacts.p
 const root = resolve(import.meta.dirname, "..");
 const read = (path) => readFile(resolve(root, "pack", path), "utf8");
 
-export async function buildJournalManifest({ origin = DEFAULT_JOURNAL_ORIGIN, allowLocal = false } = {}) {
+export async function buildJournalManifest({ origin = DEFAULT_JOURNAL_ORIGIN, allowLocal = false, environment, targets = JOURNAL_DEPLOYMENT_TARGETS } = {}) {
+  // A staging/production manifest declares the exact installation origins
+  // from the one deployment-target config (staging/production are PROPOSED
+  // there until approved), and its homepage origin must be that
+  // environment's own target origin. LAB/default manifests keep today's
+  // exact shape, with no installation_origins field.
+  let installationOrigins;
+  if (environment !== undefined) {
+    if (!["lab", "staging", "production"].includes(environment)) throw new Error(`Journal manifest needs a known build environment, got ${JSON.stringify(environment)}.`);
+    if (environment !== "lab") {
+      if (targets[environment].origin !== origin) throw new Error(`Journal ${environment} manifest origin must exactly match its ${targets[environment].configured ? "configured" : "PROPOSED"} ${environment} target origin.`);
+      installationOrigins = journalInstallationOrigins(targets);
+    }
+  }
   const pack = defineTypePack({
     id: "journal.entry",
     version: "0.1.1",
@@ -65,6 +82,7 @@ export async function buildJournalManifest({ origin = DEFAULT_JOURNAL_ORIGIN, al
     homepage,
     icon: new URL("pwa-512.png", homepage).href,
     redirect_uris: [new URL("auth/mdbase/callback", homepage).href],
+    ...(installationOrigins ? { installation_origins: installationOrigins } : {}),
     requirements: {
       contracts: pack.provides,
       access: "full_collection",

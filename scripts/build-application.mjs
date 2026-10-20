@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {execFileSync} from "node:child_process";
 import {readFile,writeFile,mkdir} from "node:fs/promises";
-import {fileURLToPath} from "node:url";
+import {fileURLToPath,pathToFileURL} from "node:url";
 import {dirname,resolve} from "node:path";
 import {build} from "esbuild";
 import {JOURNAL_MANIFEST_ID,buildJournalManifest,writeJournalManifest} from "./build-manifest.mjs";
@@ -12,24 +12,44 @@ const hash=(bytes,algorithm,encoding="hex")=>createHash(algorithm).update(bytes)
 export function applicationInputs(env){
   // The ID defaults to the manifest's own; sign-in self-registration supplies the registered one.
   const id=env.JOURNAL_REGISTERED_APPLICATION_ID??JOURNAL_MANIFEST_ID,environment=env.JOURNAL_ENVIRONMENT,origin=env.JOURNAL_ORIGIN;
-  if(!id.trim()||!['lab','production'].includes(environment)||!origin)throw new Error("Journal native builds require JOURNAL_ENVIRONMENT and JOURNAL_ORIGIN; use build:local for writing only.");
+  if(!id.trim()||!['lab','staging','production'].includes(environment)||!origin)throw new Error("Journal native builds require JOURNAL_ENVIRONMENT and JOURNAL_ORIGIN; use build:local for writing only.");
   const url=new URL(origin);
   if(url.origin!==origin||url.username||url.password||url.pathname!=="/"||url.search||url.hash||
     (url.protocol!=="https:"&&!(environment==="lab"&&url.protocol==="http:"&&['localhost','127.0.0.1','[::1]'].includes(url.hostname))))throw new Error("Journal requires an exact approved application origin.");
   return Object.freeze({registeredApplicationId:id,environment,origin});
 }
+/** Native asset filenames the packaged SDK itself loads, read from its own
+ * packaged-assets declaration instead of an app-side filename assumption.
+ * The pinned 0ecbef41 packet loads native/runtime-lab.wasm; the canonical
+ * per-environment packets (mdbase-next PR #941) load native/runtime.wasm.
+ * Deriving the names here means a repin needs no app-side rename, and the
+ * app never substitutes or copies bytes under a name the SDK won't load. */
+export function nativeAssetNames(packagedAssetsSource){
+  const names=new Set([...packagedAssetsSource.matchAll(/new URL\("\.\.\/native\/([^"]+)",\s*import\.meta\.url\)/g)].map(match=>match[1]));
+  if(!names.size||![...names].some(name=>name.endsWith(".wasm")))throw new Error("Installed SDK packaged-assets declaration names no native assets.");
+  return names;
+}
 export async function buildApplication({writingOnly=false,env=process.env,output=resolve(root,"public")}={}){
   const inputs=writingOnly?null:applicationInputs(env);
   // Native builds declare their own origin as the manifest homepage, as SDK registration requires.
-  const manifest=inputs&&await buildJournalManifest({origin:inputs.origin,allowLocal:inputs.environment==="lab"});
+  const manifest=inputs&&await buildJournalManifest({origin:inputs.origin,allowLocal:inputs.environment==="lab",environment:inputs.environment});
   const pin=JSON.parse(await readFile(resolve(root,"vendor/mdbase-sdk-dev-0ecbef41.json"),"utf8"));
   const archive=resolve(root,"vendor",pin.artifact),bytes=await readFile(archive);
   assert.equal(bytes.length,pin.bytes);assert.equal(hash(bytes,"sha256"),pin.sha256);assert.equal(`sha512-${hash(bytes,"sha512","base64")}`,pin.integrity);
   const protocol=await readFile(resolve(root,pin.protocol.file));
   assert.equal(hash(protocol,"sha256"),pin.protocol.sha256);assert.equal(`sha512-${hash(protocol,"sha512","base64")}`,pin.protocol.sri);
   const installed=dirname(fileURLToPath(import.meta.resolve("@mdbase-dev/sdk")));
+  // CP/log origins come only from the pinned packet's authenticated release
+  // trust, which is minted for one exact environment. A packet qualified
+  // for another environment can never be retargeted by build inputs: refuse
+  // here, before any bytes are copied, until the per-environment repin.
+  if(inputs){
+    const {appReleaseTrust}=await import(pathToFileURL(resolve(installed,"application/packaged-trust.js")).href);
+    const trustEnvironment=appReleaseTrust().environment;
+    if(trustEnvironment!==inputs.environment)throw new Error(`Journal ${inputs.environment} native build refused: the pinned SDK packet carries ${JSON.stringify(trustEnvironment)} release trust, not ${inputs.environment} trust. Repin the ${inputs.environment} SDK packet first.`);
+  }
   const members=execFileSync("tar",["-tf",archive],{encoding:"utf8"}).split("\n").filter(name=>name.startsWith("package/dist/")&&!name.endsWith("/"));
-  const nativeMembers=["runtime-lab.wasm","sqlite3.wasm","sqlite3.js"].map(name=>`package/dist/native/${name}`);
+  const nativeMembers=[...nativeAssetNames(await readFile(resolve(installed,"application/packaged-assets.js"),"utf8"))].map(name=>`package/dist/native/${name}`);
   if(!writingOnly&&nativeMembers.some(name=>!members.includes(name)))throw new Error("This SDK dev packet lacks packaged native assets. Use build:local; native builds need an original SDK packet containing its canonical trust and assets, not app-side substitutes.");
   for(const name of members){
     const relative=name.slice("package/dist/".length);
