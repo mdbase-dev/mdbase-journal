@@ -7,6 +7,17 @@ retained LAB0ec originals and actual `runtime-lab.wasm` metadata remain unchange
 Root NPM now pins the independently approved STAGING SDK a302 original; approved
 UI9553 and protocol129c280 pins/originals remain unchanged.
 
+## Current candidate HOLD (Co/owner follow-up)
+
+The committed c0bc/a302 STAGING original and its completed local consumer output
+are **historical custody/compatibility proof only**, not the latest/final SDK
+candidate or app readiness. NX-TNAPP owns the newly reported strict public-wire
+SDK fixes and sole replacement producer work after qualified merge. No replacement
+original/facts/SHA is READY here. Hold further c0bc product builds/publication;
+wait for independent owner originals before final target intake/one causal build.
+Never rewrite old c0bc/8c2f archives, guess replacement identity, patch/repack SDK,
+reauthenticate or infer native admission/production GO.
+
 ## Authority and original intake
 
 NX-TRUST/TNAPP perform full-chain authentication **once OFF-CI**, using private Ops
@@ -126,6 +137,13 @@ before validation or the next fallible lookup: before/run/ZIP SHA/after/runAfter
 The first failed lookup retains expected identity only; missing responses are
 not invented. Fixed refusal stage/reason replace raw transport errors. Headers,
 credentials, signed blob URLs and unrelated API-response fields are not retained.
+HTTP evidence additionally persists numeric status before reading the body, then
+bounded public body identity/error fields and its captured-byte length/SHA before
+HTTP/JSON refusal or the next lookup (including403/404/429). Body reads have a
+256KiB/30s bound; partial/truncated bodies are labelled incomplete and fail closed.
+Only fixed public GitHub messages/docs URLs are retained literally; arbitrary
+messages/non-JSON bodies retain bounded fingerprints, not opaque text. No request
+headers/credentials/unknown response fields/blob SAS URLs or raw exceptions.
 This improves failure evidence, not authentication or upload authority.
 
 ## Existing hosting, static control policy and receipts

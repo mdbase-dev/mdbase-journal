@@ -82,6 +82,35 @@ test('bad ZIP digest and changed immutable metadata/run block',async t=>{
  assert.equal(failedAfter.failure.stage,'after-run-validation');assert.match(failedAfter.failure.reason,/run attempt/);
  assert.equal(failedAfter.runAfter.run_attempt,3);assert.equal(failedAfter.after.id,42);assert.equal(failedAfter.downloadedSha256,hash(bytes));
 });
+for(const [status,message] of [[403,'Forbidden'],[404,'Not Found'],[429,'API rate limit exceeded']])test('bounded public GitHub '+status+' body AND numeric status survive HTTP refusal before any next lookup',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-public-http-'));t.after(()=>rm(parent,{recursive:true,force:true}));let calls=0;
+ const body={message,status:String(status),documentation_url:'https://docs.github.com/rest/actions/artifacts',token:'UNIT-private-token',headers:{Authorization:'UNIT-private-header'},url:'https://blob.fixture/?UNIT-private-SAS'};
+ await assert.rejects(download(expected,join(parent,'artifact'),async()=>{calls++;return Response.json(body,{status});}),/GitHub metadata unavailable/);
+ assert.equal(calls,1);
+ const text=await readFile(join(parent,'artifact-metadata.json'),'utf8'),evidence=JSON.parse(text);
+ assert.equal(evidence.beforeResponse.status,status);assert.equal(evidence.beforeResponse.body.message,message);assert.equal(evidence.beforeResponse.body.status,String(status));
+ assert.equal(evidence.beforeResponse.bodySha256,hash(JSON.stringify(body)));assert.equal(evidence.beforeResponse.bodyComplete,true);
+ assert.equal(evidence.failure.stage,'before-metadata-fetch');assert(!Object.hasOwn(evidence,'run'));assert(!Object.hasOwn(evidence,'downloadedSha256'));assert(!text.includes('UNIT-private'));
+});
+test('oversized public HTTP body is bounded, retained as incomplete fingerprint and refused before next lookup',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-http-bound-'));t.after(()=>rm(parent,{recursive:true,force:true}));let calls=0;
+ await assert.rejects(download(expected,join(parent,'artifact'),async()=>{calls++;return Response.json({message:'UNIT-private-'+ 'x'.repeat(300*1024)});}),/bounded GitHub metadata body/);
+ const text=await readFile(join(parent,'artifact-metadata.json'),'utf8'),evidence=JSON.parse(text);assert.equal(calls,1);assert.equal(evidence.beforeResponse.status,200);assert.equal(evidence.beforeResponse.bodyBytes,256*1024);assert.equal(evidence.beforeResponse.bodyTruncated,true);assert.equal(evidence.beforeResponse.bodyComplete,false);assert(!text.includes('UNIT-private'));assert(!Object.hasOwn(evidence,'run'));
+});
+test('HTTP status survives a body-reader exception; opaque exceptions are never retained',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-http-read-'));t.after(()=>rm(parent,{recursive:true,force:true}));
+ const body=new ReadableStream({pull(controller){controller.error(Error('UNIT-private-reader'));}});
+ await assert.rejects(download(expected,join(parent,'artifact'),async()=>new Response(body,{status:404})),/GitHub metadata unavailable/);
+ const text=await readFile(join(parent,'artifact-metadata.json'),'utf8'),evidence=JSON.parse(text);assert.equal(evidence.beforeResponse.status,404);assert.equal(evidence.beforeResponse.bodyComplete,false);assert(!text.includes('UNIT-private'));assert(!Object.hasOwn(evidence,'run'));
+});
+test('successful AFTER response evidence survives subsequent runAfter HTTP refusal, including public error body',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'journal-after-http-'));t.after(()=>rm(parent,{recursive:true,force:true}));
+ const bytes=zip(Object.entries(await files()).map(([p,b])=>[p,b,0o100644])),digest='sha256:'+hash(bytes),m={...meta,digest};
+ const mock=transport(bytes,{actualMeta:m,after:m});let runs=0;
+ await assert.rejects(download({...expected,digest},join(parent,'artifact'),async(url,init)=>String(url).includes('/actions/runs/') && ++runs===2?Response.json({message:'Forbidden'},{status:403}):mock(url,init)),/GitHub metadata unavailable/);
+ const evidence=JSON.parse(await readFile(join(parent,'artifact-metadata.json')));
+ assert.equal(evidence.afterResponse.status,200);assert.equal(evidence.after.id,42);assert.equal(evidence.runAfterResponse.status,403);assert.equal(evidence.runAfterResponse.body.message,'Forbidden');assert.equal(evidence.downloadedSha256,hash(bytes));assert(!Object.hasOwn(evidence,'runAfter'));
+});
 test('wrong INITIAL attempt is saved before validation and no ZIP is requested',async t=>{
  const parent=await mkdtemp(join(tmpdir(),'journal-initial-attempt-'));t.after(()=>rm(parent,{recursive:true,force:true}));
  const mock=transport(Buffer.alloc(0),{initialRun:{...run,run_attempt:3}});let zipCalls=0;
