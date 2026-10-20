@@ -7,35 +7,35 @@ import {applicationInputs,buildApplication,nativeAssetNames} from "../scripts/bu
 import {buildJournalManifest} from "../scripts/build-manifest.mjs";
 import {JOURNAL_DEPLOYMENT_TARGETS,journalDeploymentFor,journalLabDeploymentFor} from "../scripts/deployment-environment.mjs";
 const root=fileURLToPath(new URL("../",import.meta.url));
-// PROPOSED targets (nx-uiopen plan, pending Callum's approval): no Pages
-// project or domain is allocated yet, so these exist for tests only.
+// Hosting targets approved by Callum; production publication still requires
+// a separate GO and the protected publisher. These are not served receipts.
 const LAB="https://lab.mdbase-journal-lab.pages.dev";
 const STAGING="https://staging.mdbase-journal.pages.dev";
 const PRODUCTION="https://journal.mdbase.dev";
-test("PROPOSED staging/production targets refuse deployment until configured; LAB is unchanged",()=>{
+test("approved hosting targets resolve exactly; unconfigured and unknown targets still refuse",()=>{
   assert.equal(JOURNAL_DEPLOYMENT_TARGETS.staging.origin,STAGING);
   assert.equal(JOURNAL_DEPLOYMENT_TARGETS.staging.project,"mdbase-journal");
   assert.equal(JOURNAL_DEPLOYMENT_TARGETS.staging.connectOrigin,"https://connect-staging.mdbase.dev");
-  assert.equal(JOURNAL_DEPLOYMENT_TARGETS.staging.configured,false);
+  assert.equal(JOURNAL_DEPLOYMENT_TARGETS.staging.configured,true);
   assert.equal(JOURNAL_DEPLOYMENT_TARGETS.production.origin,PRODUCTION);
   assert.equal(JOURNAL_DEPLOYMENT_TARGETS.production.project,"mdbase-journal");
   assert.equal(JOURNAL_DEPLOYMENT_TARGETS.production.connectOrigin,"https://connect.mdbase.dev");
-  assert.equal(JOURNAL_DEPLOYMENT_TARGETS.production.configured,false);
-  for(const MDBASE_ENV of ["staging","production"])assert.throws(()=>journalDeploymentFor({MDBASE_ENV}),/PROPOSED|not configured/);
+  assert.equal(JOURNAL_DEPLOYMENT_TARGETS.production.configured,true);
   for(const MDBASE_ENV of [undefined,"","qa","LAB"])assert.throws(()=>journalDeploymentFor({MDBASE_ENV}));
   const lab={origin:LAB,connectOrigin:"https://connect-lab.mdbase.dev",project:"mdbase-journal-lab",branch:"lab"};
   assert.deepEqual(journalDeploymentFor({MDBASE_ENV:"lab"}),lab);
   assert.deepEqual(journalLabDeploymentFor({MDBASE_ENV:"lab"}),lab);
-  // Once a target is flipped to configured in the one config spot, the same
-  // resolver admits it with its exact target values and nothing else changes.
-  const configured={...JOURNAL_DEPLOYMENT_TARGETS,
-    staging:{...JOURNAL_DEPLOYMENT_TARGETS.staging,configured:true},
-    production:{...JOURNAL_DEPLOYMENT_TARGETS.production,configured:true}};
-  assert.deepEqual(journalDeploymentFor({MDBASE_ENV:"staging"},configured),
+  assert.deepEqual(journalDeploymentFor({MDBASE_ENV:"staging"}),
     {origin:STAGING,connectOrigin:"https://connect-staging.mdbase.dev",project:"mdbase-journal",branch:"staging"});
-  assert.deepEqual(journalDeploymentFor({MDBASE_ENV:"production"},configured),
+  // "main" selects Pages' production channel, never the Git source ref.
+  assert.deepEqual(journalDeploymentFor({MDBASE_ENV:"production"}),
     {origin:PRODUCTION,connectOrigin:"https://connect.mdbase.dev",project:"mdbase-journal",branch:"main"});
-  assert.deepEqual(journalDeploymentFor({MDBASE_ENV:"lab"},configured),lab);
+  const unconfigured={...JOURNAL_DEPLOYMENT_TARGETS,
+    staging:{...JOURNAL_DEPLOYMENT_TARGETS.staging,configured:false},
+    production:{...JOURNAL_DEPLOYMENT_TARGETS.production,configured:false}};
+  for(const MDBASE_ENV of ["staging","production"])
+    assert.throws(()=>journalDeploymentFor({MDBASE_ENV},unconfigured),/not configured/);
+  assert.deepEqual(journalDeploymentFor({MDBASE_ENV:"lab"},unconfigured),lab);
 });
 test("native build inputs admit explicit staging/production, refuse unknown and non-LAB loopback",()=>{
   const base={JOURNAL_REGISTERED_APPLICATION_ID:"build-fixture-only"};
