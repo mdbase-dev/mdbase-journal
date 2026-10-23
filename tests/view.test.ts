@@ -38,6 +38,16 @@ test("actual public singleton is lazy not_started in a controlled browser host, 
     h.window.close();
   }
 });
+test("shared collection panel has one Add a collection entry, not the stale private link", async () => {
+  const h = dom(), f = await applicationFixture();
+  const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.mdbase);
+  try {
+    f.fixture.controls.publishSnapshot(f.ready);
+    const add = await until(() => [...h.window.document.querySelectorAll<HTMLButtonElement>("#collection-panel button")].find(button => button.textContent?.trim() === "Add a collection…"));
+    assert.equal(add.tagName, "BUTTON");
+    assert.doesNotMatch(h.window.document.getElementById("collection-panel")!.textContent!, /Add a Private collection/);
+  } finally {view.dispose(); f.close(); h.window.close();}
+});
 test("local writing reopens the same entry on reload and never needs an SDK", () => {
   const h = dom(), storage = memoryStorage(), drafts = new JournalDrafts(storage);
   const a = mountJournal(h.window.document, drafts, null);
