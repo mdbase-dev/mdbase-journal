@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { assertFrozenNpm, assertBundledProtocol, installedMembers, protectedHashes, loadOriginals, originalMembers, bindCanonicalPacket, assertNativeOriginalFacts, assertProtocolFacts } from '../scripts/lib/native-originals.mjs';
 import { digest, packetFixture } from './native-packet-fixture.mjs';
+import { frozenStagingRoot } from './fixtures/staging-intake.mjs';
 const name='@mdbase-dev/sdk',pin='file:vendor/sdk.tgz',sri='sha512-fixture';
 function frozen() {
  const pkg={dependencies:{[name]:pin},devDependencies:{tool:'1.0.0'}};
@@ -79,9 +80,9 @@ for(const [label,mutate] of Object.entries({
  'native original':f=>f.sdkFiles['dist/native/runtime.wasm']=Buffer.from('substitute'),
  'protocol original custody':f=>alter(f,'artifact-facts.json',o=>o.dependencies[0].sha256='f'.repeat(64)),
 }))test('canonical binding refuses '+label,async()=>{const f=packetFixture();mutate(f);await assert.rejects(bindCanonicalPacket(f));});
-test('actual approved STAGING NPM intake binds independent owner facts and ALL installed originals before SDK execution',async()=>{
+test('actual approved STAGING NPM intake binds independent owner facts and ALL installed originals before SDK execution',async t=>{
  const {loadStagingOriginals,STAGING_FACTS_SHA256}=await import('../scripts/staging-originals.mjs');
- const originals=await loadStagingOriginals({repoRoot:new URL('../',import.meta.url).pathname,installed:true});
+ const originals=await loadStagingOriginals({repoRoot:await frozenStagingRoot(t),installed:true});
  assert.equal(originals.packet.factsSha256,STAGING_FACTS_SHA256);assert.equal(originals.environment,'staging');
  assert.deepEqual(Object.fromEntries(Object.entries(originals.archives).map(([name,a])=>[name,a.members])),{sdk:896,ui:78,protocol:67});
  assert.equal(originals.release.assetSha256,'67e117646c9c26927f0d5a44cbd26f057c318975032e9cd24f24b020150cdbc7');

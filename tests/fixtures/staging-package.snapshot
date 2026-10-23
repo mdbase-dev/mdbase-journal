@@ -1,0 +1,35 @@
+{
+  "name": "mdbase-journal",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-application.mjs",
+    "deploy:lab": "MDBASE_ENV=lab node scripts/deploy-lab.mjs",
+    "build:local": "node scripts/build-application.mjs --writing-only",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
+    "verify": "npm run typecheck && npm test && npm run build:local",
+    "predev": "npm run build:local",
+    "manifest": "node scripts/build-manifest.mjs",
+    "icons": "node scripts/icons.mjs",
+    "dev": "python3 -m http.server -d public 8765",
+    "test": "node scripts/test.mjs",
+    "test:publisher": "node --test tests/native-publish-bytes.test.mjs tests/native-publisher-policy.test.mjs tests/native-originals.test.mjs tests/native-artifact.test.mjs tests/native-hosting.test.mjs tests/native-tag.test.mjs tests/native-tool.test.mjs"
+  },
+  "dependencies": {
+    "@mdbase-dev/connect-protocol": "file:vendor/mdbase-dev-connect-protocol-0.1.0-beta.129-c280cd194ffd.tgz",
+    "@mdbase-dev/sdk": "file:vendor/sdk-dev-eaa4e697-staging.tgz",
+    "@mdbase-dev/ui": "file:vendor/ui-dev-9553ad66.tgz",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@mdbase-dev/connect-dev": "0.1.0-beta.123",
+    "@types/jsdom": "21.1.7",
+    "@types/node": "22.19.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "esbuild": "0.28.1",
+    "jsdom": "26.1.0",
+    "typescript": "5.9.3"
+  }
+}
