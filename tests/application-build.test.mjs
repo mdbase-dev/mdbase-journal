@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {mkdtemp,readFile,rm} from "node:fs/promises";
+import {mkdtemp,mkdir,readFile,rm,writeFile} from "node:fs/promises";
 import {execFileSync} from "node:child_process";
 import {fileURLToPath,pathToFileURL} from "node:url";
 import {resolve} from "node:path";
-import {applicationInputs} from "../scripts/build-application.mjs";
+import {applicationInputs,assertStylesheetsShipped} from "../scripts/build-application.mjs";
 import {legacyLabFixture} from "./legacy-lab-fixture.mjs";
 import {buildJournalManifest} from "../scripts/build-manifest.mjs";
 const root=fileURLToPath(new URL("../",import.meta.url));
@@ -40,7 +40,11 @@ test("consumer build retains original same-artifact Worker/native bytes and no p
     // Bundled: the shared collection UI with React, and only the SDK's describe (copy) modules.
     assert.deepEqual([...new Set(bundled.map(path=>path.split("/").slice(1,path.startsWith("node_modules/@")?3:2).join("/")))].sort(),["@mdbase-dev/sdk","@mdbase-dev/ui","react","react-dom","scheduler"]);
     assert(bundled.filter(path=>path.startsWith("node_modules/@mdbase-dev/sdk/")).every(path=>!/\/(testing|native)\/|application\/(entry|worker)/.test(path)));
-    assert.equal(await readFile(resolve(output,"mdbase-collections.css"),"utf8"),await readFile(resolve(root,"node_modules/@mdbase-dev/ui/css/collections.css"),"utf8"));
+    // collections.css @imports brand, motion and screens; they ship inlined.
+    const collections=await readFile(resolve(output,"mdbase-collections.css"),"utf8");
+    assert.doesNotMatch(collections,/@import/);
+    for(const name of ["brand","motion","screens","collections"])
+      assert(collections.includes(`node_modules/@mdbase-dev/ui/css/${name}.css */`),name);
     for(const member of ["application/worker.js","native/sqlite3.js","native/runtime-lab.wasm","native/sqlite3.wasm"]){
       const archive=resolve(root,"vendor/mdbase-dev-sdk-0ecbef41.tgz");
       const original=execFileSync("tar",["-xOf",archive,`package/dist/${member}`],{maxBuffer:16*1024*1024});
@@ -63,4 +67,19 @@ test("consumer build retains original same-artifact Worker/native bytes and no p
     assert.match(await readFile(resolve(output,"sdk/application/app-grant.js"),"utf8"),/deliverAppGrantCallback/);
     assert.doesNotMatch(html,/connect-popup|native-signin-ui|cdn.jsdelivr|callback-note/);
   }finally{await fixture.close();await rm(output,{recursive:true,force:true});}
+});
+test("the build refuses output that links or imports a stylesheet it does not contain",async()=>{
+  const output=await mkdtemp(resolve(root,".application-build-"));
+  try{
+    await mkdir(resolve(output,"nested"));
+    await writeFile(resolve(output,"index.html"),'<link rel="stylesheet" href="https://fonts.example/css"><link rel="stylesheet" href="/a.css"><link rel="icon" href="/missing.svg">');
+    await writeFile(resolve(output,"a.css"),'@import "./nested/b.css";');
+    await writeFile(resolve(output,"nested/b.css"),"p{}");
+    await assertStylesheetsShipped(output);
+    await writeFile(resolve(output,"a.css"),'@import "./nested/b.css";\n@import url("brand.css");');
+    await assert.rejects(()=>assertStylesheetsShipped(output),/a\.css: brand\.css/);
+    await writeFile(resolve(output,"a.css"),"");
+    await writeFile(resolve(output,"404.html"),"<link href='/screens.css' rel=stylesheet>");
+    await assert.rejects(()=>assertStylesheetsShipped(output),/404\.html: \/screens\.css/);
+  }finally{await rm(output,{recursive:true,force:true});}
 });
