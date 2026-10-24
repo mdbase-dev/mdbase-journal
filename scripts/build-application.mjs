@@ -2,7 +2,7 @@ import {buildOfflineShell} from "@mdbase-dev/sdk/offline-shell/build";
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {execFileSync} from "node:child_process";
-import {readFile,writeFile,mkdir} from "node:fs/promises";
+import {readFile,readdir,writeFile,mkdir,access} from "node:fs/promises";
 import {fileURLToPath,pathToFileURL} from "node:url";
 import {dirname,resolve} from "node:path";
 import {build} from "esbuild";
@@ -28,6 +28,24 @@ export function nativeAssetNames(packagedAssetsSource){
   const names=new Set([...packagedAssetsSource.matchAll(/new URL\("\.\.\/native\/([^"]+)",\s*import\.meta\.url\)/g)].map(match=>match[1]));
   if(!names.size||![...names].some(name=>name.endsWith(".wasm")))throw new Error("Installed SDK packaged-assets declaration names no native assets.");
   return names;
+}
+/** Every same-origin stylesheet that a page or stylesheet in the output links
+ * or imports must itself be in the output; otherwise the served app 404s it. */
+export async function assertStylesheetsShipped(output){
+  const missing=[];
+  for(const file of (await readdir(output,{recursive:true})).filter(name=>/\.(html|css)$/.test(name))){
+    const text=await readFile(resolve(output,file),"utf8");
+    const references=file.endsWith(".html")
+      ?[...text.matchAll(/<link\b[^>]*>/gi)].filter(([tag])=>/\brel=["']?stylesheet["'\s>]/i.test(tag)).map(([tag])=>tag.match(/\bhref=["']?([^"'\s>]+)/i)?.[1])
+      :[...text.matchAll(/@import\s+(?:url\(\s*)?["']?([^"')\s;]+)/g)].map(match=>match[1]);
+    for(const reference of references){
+      if(!reference){missing.push(`${file}: stylesheet link without href`);continue;}
+      if(/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(reference))continue; // another origin
+      const path=decodeURIComponent(reference.split(/[?#]/)[0]);
+      await access(path.startsWith("/")?resolve(output,"."+path):resolve(output,dirname(file),path)).catch(()=>missing.push(`${file}: ${reference}`));
+    }
+  }
+  if(missing.length)throw new Error(`Build output lacks referenced stylesheets: ${missing.join(", ")}`);
 }
 export async function buildApplication({writingOnly=false,env=process.env,output=resolve(root,"public"),originals}={}){
   const inputs=writingOnly?null:applicationInputs(env);
@@ -81,7 +99,10 @@ export async function buildApplication({writingOnly=false,env=process.env,output
       if(manifest)builder.onLoad({filter:/[\\/]public[\\/]\.well-known[\\/]mdbase-app\.json$/},()=>({contents:JSON.stringify(manifest),loader:"json"}));}}]});
   if(manifest)await writeJournalManifest(manifest,output);
   // The shared collection UI's stylesheet, served beside journal.css (which maps its tokens).
-  await writeFile(resolve(output,"mdbase-collections.css"),await readFile(fileURLToPath(import.meta.resolve("@mdbase-dev/ui/collections.css"))));
+  // Bundled, because it @imports sibling stylesheets the output does not otherwise contain.
+  await build({entryPoints:[fileURLToPath(import.meta.resolve("@mdbase-dev/ui/collections.css"))],bundle:true,
+    outfile:resolve(output,"mdbase-collections.css"),logLevel:"warning"});
+  await assertStylesheetsShipped(output);
   const imports=Object.values(app.metafile.outputs)[0].imports;
   assert(imports.length>0);
   assert.deepEqual([...new Set(imports.filter(x=>x.kind!=="dynamic-import").map(x=>x.path))],["./sdk/application/sdk.js"]);
