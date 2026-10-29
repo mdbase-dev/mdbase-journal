@@ -101,6 +101,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   }
   function render(): void {
     if (disposed) return;
+    opens?.retain(current.id);
     if (!memoryOnly && !pendingInputs) {
       const latest = drafts.get(current.id);
       if (latest) {
@@ -167,7 +168,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       const text = document.createElement("small"), saving = opens?.state(draft.id), record = data?.snapshot(draft.id);
       const state = draft.legacyKey ? "Earlier note: original save needs review" :
         draft.targetCollectionId && draft.targetCollectionId !== openId ? "Waiting for its collection" :
-        data?.problem(draft.id) ? "Original save needs attention" : saving?.state === "unresolved" ? "Original save unresolved" :
+        draft.reviewRequired || data?.problem(draft.id) ? "Original save needs attention" : saving?.state === "unresolved" ? "Original save unresolved" :
         saving?.state === "opening" || record?.state === "saving" ? "Saving…" :
         record && ["conflict", "recovery", "deleted", "error"].includes(record.state) ? "Original save needs attention" :
         record?.state === "saved_on_device" ? "Saved on this device; waiting for sync" : "On this device";
@@ -328,8 +329,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     if (current.id !== originalId) entriesDialog.close();
   });
   function save(): void {
-    const owned = data, selectedType = type, queue = opens;
-    if (!owned || !selectedType || !queue || disposed || memoryOnly) {render(); return;}
+    const owned = data, selectedType = type ?? undefined, queue = opens;
+    if (!owned || !queue || disposed || memoryOnly) {render(); return;}
     try {
       for (const draft of drafts.list()) queue.request(draft.id, selectedType, draft.id === current.id, edited.has(draft.id));
     } catch {problem = "Keep this page open: Journal cannot read its drafts on this device.";}
@@ -448,7 +449,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     void choose.then(value => {
       if (disposed || current.id !== id || inputEpoch !== chosenEpoch || !value) return;
       current = value; memoryOnly = false; conflicted = false; problem = null;
-      renderPage(); render();
+      renderPage(); save();
     }, error => {problem = error instanceof Error ? error.message : "The saved version could not be opened. Keep your text here."; render();});
   });
   if (document.defaultView) {
@@ -461,8 +462,17 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       // previous pages. Other tabs may display text without becoming writers.
       const draft = key === null ? null : drafts.get(key.slice("journal.native.note.".length));
       const record = draft ? owned?.snapshot(draft.id) : null;
-      if (!memoryOnly && !pendingInputs && owned === data && owned && draft && opens?.owns(draft.id) && record && record.body !== draft.body) {
-        const baseline = draft.id === before.id ? source : {body: record.body, revision: record.record.revision};
+      if (owned === data && owned && draft && (draft.id !== current.id || !memoryOnly && !pendingInputs) && opens?.owns(draft.id) && record && record.body !== draft.body) {
+        let baseline = draft.id === before.id ? source : null;
+        if (!baseline) {
+          // A hidden page still needs the peer edit's old text as its source,
+          // never a native revision that advanced while the event was queued.
+          try {
+            const previous = JSON.parse((event as StorageEvent).oldValue ?? "null");
+            if (previous?.id === draft.id && typeof previous.body === "string") baseline = {body: previous.body, revision: null};
+          } catch {/* Missing source text leaves the durable draft for review. */}
+        }
+        if (!baseline) {save(); return;}
         void owned.setBody(draft.id, draft.body, baseline).catch(error => {
           if (draft.id === current.id) {conflicted = true; problem = error instanceof Error ? error.message : "Your original save needs review.";}
           render();

@@ -9,12 +9,25 @@ export class DraftOpens {
   private readonly states = new Map<string, DraftOpenState>();
   private readonly owners = new Map<string, () => void>();
   private readonly waiting = new Set<string>();
+  private readonly types = new Map<string, JournalEntryType | undefined>();
+  private viewedId: string | null = null;
   private readonly caller = new AbortController();
   private disposed = false;
   private notificationPending = false;
   constructor(private readonly data: JournalData, private readonly drafts: JournalDrafts,
     private readonly isCurrent: () => boolean, private readonly notify: () => void, private readonly locks?: LockManager) {}
   owns(id: string): boolean {return this.owners.has(id);}
+  retain(viewedId: string): void {
+    this.viewedId = viewedId;
+    for (const [id, release] of this.owners) {
+      if (id === viewedId || this.jobs.has(id)) continue;
+      const draft = this.drafts.get(id), record = this.data.snapshot(id);
+      if (draft?.body === draft?.savedBody && (!record || record.state === "saved" && !record.dirty) ||
+          draft?.reviewRequired && record?.state === "conflict") {
+        this.data.close(id); this.owners.delete(id); release();
+      }
+    }
+  }
   state(id: string): DraftOpenState | null {return this.states.get(id) ?? null;}
   private changed(): void {
     if (this.notificationPending) return;
@@ -23,11 +36,12 @@ export class DraftOpens {
   }
   // Hold ownership for the lifetime of the SDK lease. Waiting tabs recover the
   // latest stored text when its owner closes, never a prefix captured on status.
-  request(id: string, type: JournalEntryType, viewed = false, edited = false): void {
+  request(id: string, type?: JournalEntryType, viewed = false, edited = false): void {
     if (this.disposed || !this.isCurrent()) return;
     const draft = this.drafts.get(id);
     if (!draft || draft.legacyKey || !draft.body.trim() || draft.body === draft.savedBody && (!viewed || !draft.recordId) ||
         draft.targetCollectionId && draft.targetCollectionId !== this.data.connection.id || this.data.snapshot(id) || this.jobs.has(id)) return;
+    this.types.set(id, type);
     if (!this.owns(id)) {
       if (this.locks) {
         if (this.waiting.has(id)) return;
@@ -37,7 +51,8 @@ export class DraftOpens {
           if (this.disposed || !this.isCurrent()) return;
           await new Promise<void>(release => {
             this.owners.set(id, release);
-            this.request(id, type, viewed, edited);
+            this.request(id, this.types.get(id), this.viewedId === id, edited);
+            this.retain(this.viewedId ?? "");
           });
         }).catch(() => {this.waiting.delete(id);});
         return;
@@ -47,10 +62,11 @@ export class DraftOpens {
       if (!viewed && !edited) return;
       this.owners.set(id, () => {});
     }
+    if (!type && !draft.recordId && !draft.createAttempt) return;
     this.jobs.add(id); this.states.set(id, {state: "opening"}); this.changed();
     void this.open(id, type);
   }
-  private async open(id: string, type: JournalEntryType): Promise<void> {
+  private async open(id: string, type?: JournalEntryType): Promise<void> {
     try {
       await this.data.open(id, type);
       if (!this.disposed && this.isCurrent()) this.states.delete(id);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {mock, test} from "node:test";
 import {readFileSync} from "node:fs";
 import {JSDOM} from "jsdom";
-import {connect, type Mdbase} from "@mdbase-dev/sdk";
+import {connect, type Mdbase, type MdbaseClient} from "@mdbase-dev/sdk";
 import {JournalDrafts, type DraftLock} from "../src/drafts.js";
 import {mountJournal} from "../src/view.js";
 import {JournalData} from "../src/journal-data.js";
@@ -12,13 +12,14 @@ async function until(check: () => boolean): Promise<void> {
   for (let i = 0; i < 200; i++) {if (check()) return; await new Promise(resolve => setTimeout(resolve, 5));}
   assert(check(), "fixture barrier did not arrive");
 }
-async function tabs() {
+async function tabs(delayCatalog = false) {
   const f = await applicationFixture();
   const peer = await connect({connector: f.replica.connector(), app: {name: "peer-journal-tab", version: "test"}, reconnect: false});
   const locks = memoryLocks(), storage = memoryStorage();
-  let tail = Promise.resolve();
-  const lock: DraftLock = operation => {const next = tail.then(operation); tail = next.then(() => {}, () => {}); return next;};
-  const describeA = mock.method(f.records, "describe", async () => catalog());
+  let tail = Promise.resolve(), pause: Promise<void> | null = null;
+  const lock: DraftLock = operation => {const barrier = pause, next = tail.then(async () => {if (barrier) await barrier; return operation();}); tail = next.then(() => {}, () => {}); return next;};
+  const catalogReady = deferred<ReturnType<typeof catalog>>();
+  const describeA = mock.method(f.records, "describe", async () => delayCatalog ? catalogReady.promise : catalog());
   const describeB = mock.method(peer, "describe", async () => catalog());
   const peerRequests: string[] = [], peerLeases = new Map<string, Awaited<ReturnType<JournalData["open"]>>>();
   const originalOpen = JournalData.prototype.open;
@@ -28,18 +29,20 @@ async function tabs() {
     if (this.connection.records === peer) peerLeases.set(args[0], lease);
     return lease;
   });
-  const peerConnection = {...f.connection, records: peer, files: peer.files};
-  const state = f.mdbase.getSnapshot();
-  assert.equal(state.phase.kind, "ready");
-  const peerSnapshot = state.phase.kind === "ready" ? {...state, phase: {...state.phase, connection: peerConnection}} : state;
-  const peerApp: Mdbase = {...f.mdbase, getSnapshot: () => peerSnapshot};
+  function application(records: MdbaseClient): Mdbase {
+    const connection = {...f.connection, records, files: records.files}, state = f.mdbase.getSnapshot();
+    assert.equal(state.phase.kind, "ready");
+    const snapshot = state.phase.kind === "ready" ? {...state, phase: {...state.phase, connection}} : state;
+    return {...f.mdbase, getSnapshot: () => snapshot};
+  }
+  const peerApp = application(peer);
   async function tab(mdbase: Mdbase) {
     const window = new JSDOM(html, {url: "https://journal.fixture/", runScripts: "outside-only"}).window;
     Object.defineProperty(window.navigator, "locks", {value: locks});
     const drafts = new JournalDrafts(storage, undefined, lock), page = window.document.querySelector<HTMLTextAreaElement>("#page")!;
     const view = await drafts.mutate(() => mountJournal(window.document, drafts, mdbase));
     return {window, drafts, page, view, write(body: string) {page.value = body; page.dispatchEvent(new window.Event("input", {bubbles: true}));},
-      storage(id: string) {window.dispatchEvent(new window.StorageEvent("storage", {key: `journal.native.note.${id}`}));},
+      storage(id: string, oldValue: string | null = null) {window.dispatchEvent(new window.StorageEvent("storage", {key: `journal.native.note.${id}`, oldValue}));},
       close() {view.dispose(); window.close();}};
   }
   const a = await tab(f.mdbase);
@@ -52,7 +55,7 @@ async function tabs() {
     statusListeners.push(listener); return () => {};
   });
   const idle = await tab(peerApp);
-  return {f, peer, a, b: idle, tab, peerApp, peerRequests, peerLeases, status() {for (const listener of [...statusListeners]) listener();},
+  return {f, peer, a, b: idle, tab, application, peerApp, peerRequests, peerLeases, catalogReady, pause(value: Promise<void> | null) {pause = value;}, status() {for (const listener of [...statusListeners]) listener();},
     async close() {a.close(); idle.close(); describeA.mock.restore(); describeB.mock.restore(); onStatus.mock.restore(); open.mock.restore(); peer.close(); await f.fixture.close();}};
 }
 const seed = "[test]", prefix = "[test] agent-20261", full = "[test] agent-20261029 full text with the remaining words.";
@@ -87,6 +90,8 @@ test("idle status sweep never autosaves a peer prefix; owner saves the complete 
 test("closing the owner hands its latest unfinished draft to an idle tab", async () => {
   const t = await tabs(), {a, b, f, peer} = t;
   const updateB = mock.method(peer, "update"), createB = mock.method(peer, "create");
+  let reloaded: Awaited<ReturnType<typeof t.tab>> | null = null;
+  let fresh: MdbaseClient | null = null;
   let lease: Awaited<ReturnType<typeof peer.records.open>> | null = null;
   try {
     a.write(seed); await until(() => a.window.document.getElementById("status")!.textContent === "Saved");
@@ -105,7 +110,18 @@ test("closing the owner hands its latest unfinished draft to an idle tab", async
     assert.equal(b.drafts.get(id)?.body, full); assert.equal(b.drafts.get(id)?.savedBody, full);
     assert.equal(createB.mock.callCount(), 0, "takeover retains the original create identity");
     assert.equal(b.page.value, "", "background recovery leaves the idle page alone");
-  } finally {lease?.release(); await t.close();}
+    fresh = await connect({connector: f.replica.connector(), app: {name: "reloaded-journal-tab", version: "test"}, reconnect: false});
+    mock.method(fresh, "describe", async () => catalog());
+    reloaded = await t.tab(t.application(fresh));
+    await until(() => reloaded!.window.document.getElementById("status")!.textContent === "Saved");
+    const resumed = await fresh.records.open(recordId, {autosave: {idleMs: 1200}});
+    try {
+      reloaded.write(full + " Continued after reload.");
+      await until(() => resumed.session.getSnapshot().body === reloaded!.page.value);
+      assert.equal((await resumed.session.flush()).ok, true);
+      await until(() => reloaded!.drafts.get(id)?.savedBody === reloaded!.page.value);
+    } finally {resumed.release();}
+  } finally {lease?.release(); reloaded?.close(); fresh?.close(); await t.close();}
 });
 test("startup restoration follows peer text without creating another writer", async () => {
   const t = await tabs(), {a, f, peer} = t;
@@ -136,12 +152,14 @@ test("the owner follows peer edits to its previous page without a second session
     a.write(seed); await until(() => a.window.document.getElementById("status")!.textContent === "Saved");
     const id = a.view.currentDraft().id, recordId = a.drafts.get(id)!.recordId!;
     lease = await f.records.records.open(recordId, {autosave: {idleMs: 1200}});
+    a.write(prefix); await until(() => lease!.session.getSnapshot().body === prefix);
     follower = await t.tab(t.peerApp);
     await new Promise<void>(resolve => setImmediate(resolve));
     a.view.newPage();
     await until(() => a.view.currentDraft().id !== id);
+    const previous = JSON.stringify(a.drafts.get(id));
     follower.write(full); await until(() => follower!.drafts.get(id)?.body === full);
-    a.storage(id);
+    a.storage(id, previous);
     await until(() => lease!.session.getSnapshot().body === full);
     assert.equal((await lease.session.flush()).ok, true);
     assert.equal((await f.records.get(recordId, {body: true})).body, full);
@@ -149,23 +167,19 @@ test("the owner follows peer edits to its previous page without a second session
     assert.equal(a.page.value, "");
   } finally {lease?.release(); follower?.close(); await t.close();}
 });
-test("typing before the catalog arrives keeps previous pages eligible to save", async () => {
-  const f = await applicationFixture(), storage = memoryStorage(), drafts = new JournalDrafts(storage);
-  const window = new JSDOM(html, {url: "https://journal.fixture/", runScripts: "outside-only"}).window;
-  const page = window.document.querySelector<HTMLTextAreaElement>("#page")!;
-  const ready = deferred<ReturnType<typeof catalog>>();
-  const describe = mock.method(f.records, "describe", () => ready.promise);
-  const view = mountJournal(window.document, drafts, f.mdbase);
-  const write = (body: string) => {page.value = body; page.dispatchEvent(new window.Event("input"));};
+test("typing before the catalog arrives keeps ownership and previous pages eligible", async () => {
+  const t = await tabs(true), {a, b} = t;
   try {
-    write("Earlier unfinished page"); await until(() => !!drafts.get(view.currentDraft().id));
-    const first = view.currentDraft().id;
-    view.newPage(); write("Current page");
-    const second = view.currentDraft().id;
-    ready.resolve(catalog());
-    await until(() => drafts.get(first)?.savedBody === "Earlier unfinished page" && drafts.get(second)?.savedBody === "Current page");
-    assert.notEqual(first, second);
-  } finally {ready.resolve(catalog()); view.dispose(); describe.mock.restore(); window.close(); await f.fixture.close();}
+    a.write("Earlier unfinished page"); await until(() => !!a.drafts.get(a.view.currentDraft().id));
+    const first = a.view.currentDraft().id;
+    b.storage(first); t.status(); await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(t.peerRequests.length, 0, "catalog loading does not give the idle tab ownership");
+    a.view.newPage(); await until(() => a.view.currentDraft().id !== first);
+    a.write("Current page"); const second = a.view.currentDraft().id;
+    t.catalogReady.resolve(catalog());
+    await until(() => a.drafts.get(first)?.savedBody === "Earlier unfinished page" && a.drafts.get(second)?.savedBody === "Current page");
+    assert.equal(a.window.document.getElementById("status")!.textContent, "Saved");
+  } finally {t.catalogReady.resolve(catalog()); await t.close();}
 });
 test("an independent editor still conflicts and local text is discarded only by explicit choice", async () => {
   const t = await tabs(), {a, f, peer} = t;
@@ -191,4 +205,76 @@ test("an independent editor still conflicts and local text is discarded only by 
     assert.equal(a.drafts.get(id)?.body, "Independent edit");
     assert.equal((await f.records.get(recordId, {body: true})).body, "Independent edit");
   } finally {active?.release(); editor?.release(); await t.close();}
+});
+test("a delayed peer edit of a hidden page cannot borrow a later outside revision", async () => {
+  const t = await tabs(), {a, f, peer} = t;
+  let follower: Awaited<ReturnType<typeof t.tab>> | null = null;
+  let active: Awaited<ReturnType<typeof f.records.records.open>> | null = null;
+  let editor: Awaited<ReturnType<typeof peer.records.open>> | null = null;
+  try {
+    a.write(seed); await until(() => a.window.document.getElementById("status")!.textContent === "Saved");
+    const id = a.view.currentDraft().id, recordId = a.drafts.get(id)!.recordId!;
+    active = await f.records.records.open(recordId, {autosave: {idleMs: 1200}});
+    follower = await t.tab(t.peerApp);
+    const previous = JSON.stringify(a.drafts.get(id));
+    follower.write(full); await until(() => follower!.drafts.get(id)?.body === full);
+    a.view.newPage(); await until(() => a.view.currentDraft().id !== id);
+    // Delay the input's storage event until the clean owner follows an outside
+    // native update. Its newly observed revision is not the peer edit's base.
+    editor = await peer.records.open(recordId, {autosave: false});
+    editor.session.setBody("Independent edit");
+    assert.equal((await editor.session.flush()).ok, true);
+    await until(() => active!.session.getSnapshot().body === "Independent edit");
+    a.storage(id, previous);
+    await until(() => a.drafts.get(id)?.reviewRequired === true);
+    assert.equal((await active.session.flush()).ok, true);
+    assert.equal((await f.records.get(recordId, {body: true})).body, "Independent edit");
+    assert.equal(a.drafts.get(id)?.body, full);
+    assert.equal(follower.page.value, full);
+  } finally {active?.release(); editor?.release(); follower?.close(); await t.close();}
+});
+test("queued input on the current page cannot skip the previous page's last peer edit", async () => {
+  const t = await tabs(), {a, f} = t, gate = deferred<void>();
+  let follower: Awaited<ReturnType<typeof t.tab>> | null = null;
+  let active: Awaited<ReturnType<typeof f.records.records.open>> | null = null;
+  try {
+    a.write(seed); await until(() => a.window.document.getElementById("status")!.textContent === "Saved");
+    const id = a.view.currentDraft().id, recordId = a.drafts.get(id)!.recordId!;
+    active = await f.records.records.open(recordId, {autosave: {idleMs: 1200}});
+    a.write(prefix); await until(() => active!.session.getSnapshot().body === prefix);
+    follower = await t.tab(t.peerApp);
+    a.view.newPage(); await until(() => a.view.currentDraft().id !== id);
+    const previous = JSON.stringify(a.drafts.get(id));
+    follower.write(full); await until(() => follower!.drafts.get(id)?.body === full);
+    t.pause(gate.promise); a.write("Typing on the new page"); a.storage(id, previous);
+    t.pause(null); gate.resolve();
+    await until(() => active!.session.getSnapshot().body === full);
+    assert.equal((await active.session.flush()).ok, true);
+    assert.equal((await f.records.get(recordId, {body: true})).body, full);
+  } finally {t.pause(null); gate.resolve(); active?.release(); follower?.close(); await t.close();}
+});
+test("a background conflict is visible and recoverable in the displaying tab", async () => {
+  const t = await tabs(), {a, f, peer} = t;
+  let follower: Awaited<ReturnType<typeof t.tab>> | null = null;
+  let active: Awaited<ReturnType<typeof f.records.records.open>> | null = null;
+  let editor: Awaited<ReturnType<typeof peer.records.open>> | null = null;
+  try {
+    a.write(seed); await until(() => a.window.document.getElementById("status")!.textContent === "Saved");
+    const id = a.view.currentDraft().id, recordId = a.drafts.get(id)!.recordId!;
+    active = await f.records.records.open(recordId, {autosave: {idleMs: 1200}});
+    a.write(full); await until(() => active!.session.getSnapshot().body === full);
+    follower = await t.tab(t.peerApp);
+    a.view.newPage(); await until(() => a.view.currentDraft().id !== id);
+    editor = await peer.records.open(recordId, {autosave: false});
+    editor.session.setBody("Independent edit"); assert.equal((await editor.session.flush()).ok, true);
+    editor.release(); editor = null;
+    await until(() => a.drafts.get(id)?.reviewRequired === true);
+    follower.storage(id);
+    assert.equal(follower.window.document.getElementById("draft-conflict")!.hidden, false);
+    assert.equal(follower.page.value, full);
+    follower.window.document.getElementById("use-saved-version")!.click();
+    await until(() => follower!.page.value === "Independent edit");
+    await until(() => follower!.window.document.getElementById("status")!.textContent === "Saved");
+    assert.equal((await f.records.get(recordId, {body: true})).body, "Independent edit");
+  } finally {active?.release(); editor?.release(); follower?.close(); await t.close();}
 });

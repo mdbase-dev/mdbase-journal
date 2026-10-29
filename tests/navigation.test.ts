@@ -163,3 +163,32 @@ test("saved entries use the bound type and original record, without another crea
     } finally {spy.mock.restore();}
   } finally {data.release(); h.close();}
 });
+test("existing entries save without choosing a type in a collection with several implementations", async () => {
+  const f = await applicationFixture(), drafts = new JournalDrafts(memoryStorage());
+  const first = catalog(), other = catalog("written", "another-entry");
+  const describe = mock.method(f.records, "describe", async () => ({...first, types: [...first.types, ...other.types],
+    contracts: [{...first.contracts[0]!, implementedBy: [first.types[0]!.name, other.types[0]!.name]}]}));
+  const date = new Date(); date.setDate(date.getDate() - 1);
+  const created = await f.records.save(f.records.create({type: first.types[0]!.name, path: "journal/existing.md", frontmatter: {created: date.toISOString()}, body: "Existing page"}));
+  assert.equal(created.outcome, "confirmed");
+  const window = new JSDOM(html, {url: "https://journal.fixture/"}).window;
+  const {memoryLocks} = await import("./support.js");
+  Object.defineProperty(window.navigator, "locks", {value: memoryLocks()});
+  const view = mountJournal(window.document, drafts, f.mdbase), create = mock.method(f.records, "create");
+  const until = async (ready: () => boolean) => {for (let i = 0; i < 200 && !ready(); i++) await new Promise(resolve => setTimeout(resolve, 5)); assert(ready());};
+  let lease: Awaited<ReturnType<typeof f.records.records.open>> | null = null;
+  try {
+    window.document.getElementById("previous-day")!.click();
+    await until(() => window.document.getElementById("status")!.textContent === "Saved");
+    const page = window.document.getElementById("page") as HTMLTextAreaElement;
+    assert.equal(page.value, "Existing page");
+    assert.equal((window.document.getElementById("entry-type") as HTMLSelectElement).value, "");
+    lease = await f.records.records.open(view.currentDraft().recordId!, {autosave: {idleMs: 1200}});
+    page.value = "Existing page edited"; page.dispatchEvent(new window.Event("input"));
+    await until(() => lease!.session.getSnapshot().body === page.value);
+    assert.equal((await lease.session.flush()).ok, true);
+    await until(() => window.document.getElementById("status")!.textContent === "Saved");
+    assert.equal(create.mock.callCount(), 0);
+    assert.equal((await f.records.get(view.currentDraft().recordId!, {body: true})).body, page.value);
+  } finally {lease?.release(); create.mock.restore(); view.dispose(); describe.mock.restore(); window.close(); await f.fixture.close();}
+});

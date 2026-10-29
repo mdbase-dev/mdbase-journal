@@ -150,6 +150,11 @@ export class JournalData {
       const unsubscribe = lease.session.subscribe(() => {
         if (this.disposed || !this.connection.isCurrent() || this.problems.has(id)) return;
         const value = lease.session.getSnapshot(), capture = value.recovery;
+        if (value.state === "conflict" && !this.drafts.get(id)?.reviewRequired) {
+          void this.drafts.mutate(() => this.drafts.patch(id, {reviewRequired: true}))
+            .catch(() => {this.problems.set(id, "Keep this page open: Journal cannot preserve its conflict on this device.");})
+            .finally(() => this.notify());
+        }
         if (value.state === "saving" && capture?.baseRevision && capture.recordId === value.record.id && this.capturedEdits.get(id)?.mutationId !== capture.mutationId) {
           this.capturedEdits.set(id, {mutationId: capture.mutationId, baseRevision: capture.baseRevision, body: value.body});
         }
@@ -238,6 +243,11 @@ export class JournalData {
     const bytes = await this.connection.files.download(ref, {signal: this.caller.signal});
     this.ensure();
     return bytes;
+  }
+  close(id: string): void {
+    this.unsubscriptions.get(id)?.(); this.unsubscriptions.delete(id);
+    this.leases.get(id)?.release(); this.leases.delete(id); this.capturedEdits.delete(id);
+    this.unpins.get(id)?.(); this.unpins.delete(id);
   }
   release(): void {
     if (this.disposed) return;
