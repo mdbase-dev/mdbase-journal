@@ -100,7 +100,7 @@ test("settings dialog has a visible accessible name and its trigger identifies i
   assert.equal(menu.getAttribute("aria-describedby"), "menu-connection");
   h.window.close();
 });
-for (const trigger of ["menu-button", "status-button"]) test(`${trigger} initializes settings without resetting the writing folder`, () => {
+for (const trigger of ["menu-button", "status-button"]) for (const close of ["button", "escape"]) test(`${trigger} initializes settings and regains focus after ${close}`, () => {
   const h = dom(), drafts = new JournalDrafts(memoryStorage());
   drafts.savePreferences({folder: "writing", theme: "system"});
   const menu = h.window.document.getElementById("menu") as HTMLDialogElement;
@@ -112,8 +112,14 @@ for (const trigger of ["menu-button", "status-button"]) test(`${trigger} initial
   h.click(trigger);
   assert.equal(menu.open, true);
   assert.equal((h.window.document.getElementById("folder") as HTMLInputElement).value, "writing");
-  h.click("close-menu");
-  assert.equal(menu.open, false); assert.equal(h.window.document.activeElement, h.page);
+  h.window.document.getElementById("folder")!.focus();
+  if (close === "button") h.click("close-menu");
+  else {
+    // Native Escape dispatches cancel and then closes unless cancelled.
+    const cancel = new h.window.Event("cancel", {cancelable: true});
+    if (menu.dispatchEvent(cancel)) menu.close();
+  }
+  assert.equal(menu.open, false); assert.equal(h.window.document.activeElement, h.window.document.getElementById(trigger));
   assert.equal(drafts.preferences().folder, "writing");
   assert.equal(view.currentDraft().id, original.id); assert.equal(view.currentDraft().body, "Original note");
   view.newPage(); h.write("Next note"); assert(view.currentDraft().path?.startsWith("writing/"));

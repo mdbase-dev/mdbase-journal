@@ -45,3 +45,22 @@ export function deferred<T>() {
   const promise = new Promise<T>((yes, no) => {resolve = yes; reject = no;});
   return {promise, resolve, reject};
 }
+/** Exclusive Web Locks stand-in shared by the simulated tab navigators. */
+export function memoryLocks(): LockManager {
+  const tails = new Map<string, Promise<void>>();
+  return {request(name: string, options: LockOptions, callback: LockGrantedCallback<unknown>) {
+    const previous = tails.get(name) ?? Promise.resolve(), done = deferred<void>();
+    tails.set(name, previous.then(() => done.promise));
+    return (async () => {
+      const aborted = deferred<never>();
+      const abort = () => aborted.reject(new Error("Lock request aborted"));
+      options.signal?.addEventListener("abort", abort, {once: true});
+      try {
+        if (options.signal?.aborted) throw new Error("Lock request aborted");
+        await Promise.race([previous, aborted.promise]);
+        options.signal?.removeEventListener("abort", abort);
+        return await callback({name, mode: "exclusive"});
+      } finally {options.signal?.removeEventListener("abort", abort); done.resolve();}
+    })();
+  }} as LockManager;
+}

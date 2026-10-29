@@ -42,6 +42,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   let displayedRecordRevision: string | null = null;
   let conflicted = false;
   const retrying = new Set<string>();
+  const edited = new Set<string>();
   const preferences = drafts.preferences();
   let folder = preferences.folder;
   const segmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, {granularity: "word"}) : null;
@@ -100,6 +101,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   }
   function render(): void {
     if (disposed) return;
+    opens?.retain(current.id);
     if (!memoryOnly && !pendingInputs) {
       const latest = drafts.get(current.id);
       if (latest) {
@@ -129,6 +131,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     let message = problem ?? data?.problem(current.id);
     const opening = opens?.state(current.id);
     if (!message && current.legacyKey) message = "Earlier note: review its original save. Your text stays on this device.";
+    if (!message && current.reviewRequired) message = "Your text is on this device. Resolve its original save before continuing.";
     if (!message && opening?.state === "unresolved") message = "The original save is unresolved. Your text stays on this device.";
     if (!message && record && ["conflict", "recovery", "deleted", "error"].includes(record.state)) message = "Your text is on this device. Resolve its original save before continuing.";
     if (!message && actionProblem) message = actionProblem.title;
@@ -166,7 +169,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       const text = document.createElement("small"), saving = opens?.state(draft.id), record = data?.snapshot(draft.id);
       const state = draft.legacyKey ? "Earlier note: original save needs review" :
         draft.targetCollectionId && draft.targetCollectionId !== openId ? "Waiting for its collection" :
-        data?.problem(draft.id) ? "Original save needs attention" : saving?.state === "unresolved" ? "Original save unresolved" :
+        draft.reviewRequired || data?.problem(draft.id) ? "Original save needs attention" : saving?.state === "unresolved" ? "Original save unresolved" :
         saving?.state === "opening" || record?.state === "saving" ? "Saving…" :
         record && ["conflict", "recovery", "deleted", "error"].includes(record.state) ? "Original save needs attention" :
         record?.state === "saved_on_device" ? "Saved on this device; waiting for sync" : "On this device";
@@ -327,10 +330,10 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     if (current.id !== originalId) entriesDialog.close();
   });
   function save(): void {
-    const owned = data, selectedType = type, queue = opens;
-    if (!owned || !selectedType || !queue || disposed || memoryOnly) {render(); return;}
+    const owned = data, selectedType = type ?? undefined, queue = opens;
+    if (!owned || !queue || disposed || memoryOnly) {render(); return;}
     try {
-      for (const draft of drafts.list()) queue.request(draft.id, selectedType, draft.id === current.id);
+      for (const draft of drafts.list()) queue.request(draft.id, selectedType, draft.id === current.id, edited.has(draft.id));
     } catch {problem = "Keep this page open: Journal cannot read its drafts on this device.";}
     render();
   }
@@ -345,7 +348,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       entries = []; entriesLoading = false;
       if (next) {
         const owned = new JournalData(next, drafts); data = owned;
-        opens = new DraftOpens(owned, drafts, () => !disposed && data === owned && owned.connection.isCurrent(), render);
+        opens = new DraftOpens(owned, drafts, () => !disposed && data === owned && owned.connection.isCurrent(), render, document.defaultView?.navigator.locks);
         unlistenData = owned.subscribe(render);
         // A status push (back online, pending writes settled) is when a failed open can succeed.
         unlistenStatus = next.records.onStatus(save);
@@ -382,6 +385,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     void drafts.mutate(() => {
       if (!drafts.get(base.id) && !wasUnpersisted) throw new DraftPersistenceError();
       const value = drafts.updateBody(base, body, base.path ?? (body.trim() ? notePath(new Date(base.createdMs), folder, base.id) : null));
+      edited.add(base.id);
       if (current.id === base.id && epoch === inputEpoch) {current = value; memoryOnly = false; unpersistedDraft = false; problem = null;}
       if (owned === data && owned?.snapshot(base.id)) {
         void owned.setBody(base.id, body, source).catch(error => {
@@ -401,14 +405,15 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   listen(element("new-button"), "click", newPage);
   listen(element("undo-button"), "click", undoNewPage);
   listen(element("retry-button"), "click", () => retry(current.id));
-  function openMenu(): void {element<HTMLInputElement>("folder").value = folder; render(); menu.showModal();}
-  listen(element("menu-button"), "click", openMenu);
+  let menuOpener: HTMLElement | null = null;
+  function openMenu(opener: HTMLElement): void {menuOpener = opener; element<HTMLInputElement>("folder").value = folder; render(); menu.showModal();}
+  listen(element("menu-button"), "click", event => openMenu(event.currentTarget as HTMLElement));
   listen(element("close-menu"), "click", () => menu.close());
   listen(menu, "close", () => {
     const candidate = element<HTMLInputElement>("folder").value.trim() || "journal";
     try {notePath(new Date(), candidate); transaction(() => {drafts.savePreferences({...preferences, folder: candidate}); folder = candidate;});}
     catch {problem = "Choose a folder within this collection that Journal can preserve on this device."; render();}
-    page.focus();
+    menuOpener?.focus();
   });
   listen(typeChoice, "change", () => {
     type = types.find(item => item.name === typeChoice.value) ?? null;
@@ -418,7 +423,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     }
     save();
   });
-  listen(element("status-button"), "click", () => {if (problem && data) void save(); else openMenu();});
+  listen(element("status-button"), "click", event => {if (problem && data) void save(); else openMenu(event.currentTarget as HTMLElement);});
   function applyTheme(): void {
     if (preferences.theme === "system") document.documentElement.removeAttribute("data-theme");
     else document.documentElement.dataset.theme = preferences.theme;
@@ -445,22 +450,35 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     void choose.then(value => {
       if (disposed || current.id !== id || inputEpoch !== chosenEpoch || !value) return;
       current = value; memoryOnly = false; conflicted = false; problem = null;
-      renderPage(); render();
+      renderPage(); save();
     }, error => {problem = error instanceof Error ? error.message : "The saved version could not be opened. Keep your text here."; render();});
   });
   if (document.defaultView) {
     listen(document.defaultView, "storage", event => {
       const key = (event as StorageEvent).key;
-      if (key !== null && key !== `journal.native.note.${current.id}`) return;
+      if (key !== null && !key.startsWith("journal.native.note.")) return;
       const before = current, owned = data, source = {body: current.body, revision: displayedRecordRevision};
       render();
-      // Another tab's durable local edit can use this same original lease.
-      // The displayed-source guard still refuses a changed native baseline.
-      if (!memoryOnly && !pendingInputs && owned === data && before.id === current.id && before.body !== current.body && owned?.snapshot(current.id)) {
-        void owned.setBody(current.id, current.body, source).catch(error => {
-          conflicted = true; problem = error instanceof Error ? error.message : "Your original save needs review."; render();
+      // Only the autosave owner follows durable peer edits, including its
+      // previous pages. Other tabs may display text without becoming writers.
+      const draft = key === null ? null : drafts.get(key.slice("journal.native.note.".length));
+      const record = draft ? owned?.snapshot(draft.id) : null;
+      if (owned === data && owned && draft && (draft.id !== current.id || !memoryOnly && !pendingInputs) && opens?.owns(draft.id) && record && record.body !== draft.body) {
+        let baseline = draft.id === before.id ? source : null;
+        if (!baseline) {
+          // A hidden page still needs the peer edit's old text as its source,
+          // never a native revision that advanced while the event was queued.
+          try {
+            const previous = JSON.parse((event as StorageEvent).oldValue ?? "null");
+            if (previous?.id === draft.id && typeof previous.body === "string") baseline = {body: previous.body, revision: null};
+          } catch {/* Missing source text leaves the durable draft for review. */}
+        }
+        if (baseline) void owned.setBody(draft.id, draft.body, baseline).catch(error => {
+          if (draft.id === current.id) {conflicted = true; problem = error instanceof Error ? error.message : "Your original save needs review.";}
+          render();
         });
       }
+      save();
     });
     listen(document.defaultView, "beforeunload", event => {
       if (memoryOnly || pendingInputs || current.reviewRequired) {event.preventDefault(); (event as BeforeUnloadEvent).returnValue = "";}

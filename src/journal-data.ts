@@ -87,7 +87,6 @@ export class JournalData {
     this.ensure(); currentRecord(record, entry.id);
     const draft = await this.drafts.mutate(() => this.drafts.put({...this.drafts.blank(this.connection.id, new Date(entry.createdMs)), id: entry.id,
       created: entry.created, body: record.body!, savedBody: record.body!, path: record.path, recordId: record.id}));
-    await this.open(draft.id);
     this.ensure();
     return this.drafts.get(draft.id)!;
   }
@@ -151,6 +150,11 @@ export class JournalData {
       const unsubscribe = lease.session.subscribe(() => {
         if (this.disposed || !this.connection.isCurrent() || this.problems.has(id)) return;
         const value = lease.session.getSnapshot(), capture = value.recovery;
+        if (value.state === "conflict" && !this.drafts.get(id)?.reviewRequired) {
+          void this.drafts.mutate(() => this.drafts.patch(id, {reviewRequired: true}))
+            .catch(() => {this.problems.set(id, "Keep this page open: Journal cannot preserve its conflict on this device.");})
+            .finally(() => this.notify());
+        }
         if (value.state === "saving" && capture?.baseRevision && capture.recordId === value.record.id && this.capturedEdits.get(id)?.mutationId !== capture.mutationId) {
           this.capturedEdits.set(id, {mutationId: capture.mutationId, baseRevision: capture.baseRevision, body: value.body});
         }
@@ -213,13 +217,19 @@ export class JournalData {
     this.ensure(original, true);
     const record = await this.connection.records.get(original.recordId, {body: true, document: true}, this.caller.signal);
     this.ensure(original, true); currentRecord(record, original.recordId);
-    return this.drafts.mutate(() => {
-      const latest = this.drafts.get(id);
-      if (!latest || latest.revision !== original.revision) throw new Error("Your text changed while the saved version was opening. Copy it before trying again.");
-      const session = this.leases.get(id)?.session;
-      if (session?.getSnapshot().state === "conflict") session.resolve({keep: "theirs"});
-      return this.drafts.patch(id, {body: record.body!, savedBody: record.body!, reviewRequired: false});
-    });
+    const owned = this.leases.get(id);
+    // A released conflict can still be retained by this SDK client. Reopen it
+    // only for this explicit discard, without seeding an autosaving draft.
+    const lease = owned ?? await this.connection.records.records.open(original.recordId, {signal: this.caller.signal, autosave: {idleMs: 1200}});
+    try {
+      this.ensure(original, true);
+      return await this.drafts.mutate(() => {
+        const latest = this.drafts.get(id);
+        if (!latest || latest.revision !== original.revision) throw new Error("Your text changed while the saved version was opening. Copy it before trying again.");
+        if (lease.session.getSnapshot().state === "conflict") lease.session.resolve({keep: "theirs"});
+        return this.drafts.patch(id, {body: record.body!, savedBody: record.body!, reviewRequired: false});
+      });
+    } finally {if (!owned) lease.release();}
   }
   problem(id: string): string | null {return this.problems.get(id) ?? null;}
   snapshot(id: string): RecordSessionSnapshot | null {return this.leases.get(id)?.session.getSnapshot() ?? null;}
@@ -239,6 +249,11 @@ export class JournalData {
     const bytes = await this.connection.files.download(ref, {signal: this.caller.signal});
     this.ensure();
     return bytes;
+  }
+  close(id: string): void {
+    this.unsubscriptions.get(id)?.(); this.unsubscriptions.delete(id);
+    this.leases.get(id)?.release(); this.leases.delete(id); this.capturedEdits.delete(id);
+    this.unpins.get(id)?.(); this.unpins.delete(id);
   }
   release(): void {
     if (this.disposed) return;
