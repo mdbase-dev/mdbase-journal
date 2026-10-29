@@ -253,7 +253,7 @@ test("queued input on the current page cannot skip the previous page's last peer
     assert.equal((await f.records.get(recordId, {body: true})).body, full);
   } finally {t.pause(null); gate.resolve(); active?.release(); follower?.close(); await t.close();}
 });
-test("a background conflict is visible and recoverable in the displaying tab", async () => {
+for (const hideOwner of [true, false]) test(`a conflict is recoverable from another tab (owner ${hideOwner ? "hidden" : "displayed"})`, async () => {
   const t = await tabs(), {a, f, peer} = t;
   let follower: Awaited<ReturnType<typeof t.tab>> | null = null;
   let active: Awaited<ReturnType<typeof f.records.records.open>> | null = null;
@@ -264,7 +264,7 @@ test("a background conflict is visible and recoverable in the displaying tab", a
     active = await f.records.records.open(recordId, {autosave: {idleMs: 1200}});
     a.write(full); await until(() => active!.session.getSnapshot().body === full);
     follower = await t.tab(t.peerApp);
-    a.view.newPage(); await until(() => a.view.currentDraft().id !== id);
+    if (hideOwner) {a.view.newPage(); await until(() => a.view.currentDraft().id !== id);}
     editor = await peer.records.open(recordId, {autosave: false});
     editor.session.setBody("Independent edit"); assert.equal((await editor.session.flush()).ok, true);
     editor.release(); editor = null;
@@ -275,6 +275,15 @@ test("a background conflict is visible and recoverable in the displaying tab", a
     follower.window.document.getElementById("use-saved-version")!.click();
     await until(() => follower!.page.value === "Independent edit");
     await until(() => follower!.window.document.getElementById("status")!.textContent === "Saved");
-    assert.equal((await f.records.get(recordId, {body: true})).body, "Independent edit");
+    a.storage(id);
+    assert.equal(a.drafts.get(id)?.reviewRequired, false);
+    const resumed = await peer.records.open(recordId, {autosave: {idleMs: 1200}});
+    try {
+      follower.write("Independent edit continued");
+      await until(() => resumed.session.getSnapshot().body === follower!.page.value);
+      assert.equal((await resumed.session.flush()).ok, true);
+      assert.equal((await f.records.get(recordId, {body: true})).body, follower.page.value);
+      assert.equal(a.drafts.get(id)?.reviewRequired, false);
+    } finally {resumed.release();}
   } finally {active?.release(); editor?.release(); follower?.close(); await t.close();}
 });

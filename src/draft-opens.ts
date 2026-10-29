@@ -10,6 +10,7 @@ export class DraftOpens {
   private readonly owners = new Map<string, () => void>();
   private readonly waiting = new Set<string>();
   private readonly types = new Map<string, JournalEntryType | undefined>();
+  private readonly releasing = new Set<string>();
   private viewedId: string | null = null;
   private readonly caller = new AbortController();
   private disposed = false;
@@ -20,11 +21,21 @@ export class DraftOpens {
   retain(viewedId: string): void {
     this.viewedId = viewedId;
     for (const [id, release] of this.owners) {
-      if (id === viewedId || this.jobs.has(id)) continue;
+      if (this.jobs.has(id) || this.releasing.has(id)) continue;
       const draft = this.drafts.get(id), record = this.data.snapshot(id);
-      if (draft?.body === draft?.savedBody && (!record || record.state === "saved" && !record.dirty) ||
+      if (id !== viewedId && draft?.body === draft?.savedBody && (!record || record.state === "saved" && !record.dirty) ||
           draft?.reviewRequired && record?.state === "conflict") {
-        this.data.close(id); this.owners.delete(id); release();
+        const finish = () => {this.data.close(id); this.owners.delete(id); release();};
+        if (!record || record.state === "conflict") {finish(); continue;}
+        // Saved is published before the SDK's original drive has returned.
+        // Let that drive finish before releasing its lease and ownership.
+        this.releasing.add(id);
+        void this.data.flush(id).then(() => {
+          if (this.disposed || id === this.viewedId) return;
+          const latest = this.drafts.get(id), saved = this.data.snapshot(id);
+          if (latest?.body === latest?.savedBody && saved?.state === "saved" && !saved.dirty) finish();
+        }).catch(() => {/* Keep ownership while the original save needs attention. */})
+          .finally(() => {this.releasing.delete(id); if (this.data.snapshot(id)?.state === "conflict") this.changed();});
       }
     }
   }

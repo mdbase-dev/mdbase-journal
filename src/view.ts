@@ -131,6 +131,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     let message = problem ?? data?.problem(current.id);
     const opening = opens?.state(current.id);
     if (!message && current.legacyKey) message = "Earlier note: review its original save. Your text stays on this device.";
+    if (!message && current.reviewRequired) message = "Your text is on this device. Resolve its original save before continuing.";
     if (!message && opening?.state === "unresolved") message = "The original save is unresolved. Your text stays on this device.";
     if (!message && record && ["conflict", "recovery", "deleted", "error"].includes(record.state)) message = "Your text is on this device. Resolve its original save before continuing.";
     if (!message && actionProblem) message = actionProblem.title;
@@ -472,8 +473,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
             if (previous?.id === draft.id && typeof previous.body === "string") baseline = {body: previous.body, revision: null};
           } catch {/* Missing source text leaves the durable draft for review. */}
         }
-        if (!baseline) {save(); return;}
-        void owned.setBody(draft.id, draft.body, baseline).catch(error => {
+        if (baseline) void owned.setBody(draft.id, draft.body, baseline).catch(error => {
           if (draft.id === current.id) {conflicted = true; problem = error instanceof Error ? error.message : "Your original save needs review.";}
           render();
         });

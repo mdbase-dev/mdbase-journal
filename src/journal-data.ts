@@ -217,13 +217,19 @@ export class JournalData {
     this.ensure(original, true);
     const record = await this.connection.records.get(original.recordId, {body: true, document: true}, this.caller.signal);
     this.ensure(original, true); currentRecord(record, original.recordId);
-    return this.drafts.mutate(() => {
-      const latest = this.drafts.get(id);
-      if (!latest || latest.revision !== original.revision) throw new Error("Your text changed while the saved version was opening. Copy it before trying again.");
-      const session = this.leases.get(id)?.session;
-      if (session?.getSnapshot().state === "conflict") session.resolve({keep: "theirs"});
-      return this.drafts.patch(id, {body: record.body!, savedBody: record.body!, reviewRequired: false});
-    });
+    const owned = this.leases.get(id);
+    // A released conflict can still be retained by this SDK client. Reopen it
+    // only for this explicit discard, without seeding an autosaving draft.
+    const lease = owned ?? await this.connection.records.records.open(original.recordId, {signal: this.caller.signal, autosave: {idleMs: 1200}});
+    try {
+      this.ensure(original, true);
+      return await this.drafts.mutate(() => {
+        const latest = this.drafts.get(id);
+        if (!latest || latest.revision !== original.revision) throw new Error("Your text changed while the saved version was opening. Copy it before trying again.");
+        if (lease.session.getSnapshot().state === "conflict") lease.session.resolve({keep: "theirs"});
+        return this.drafts.patch(id, {body: record.body!, savedBody: record.body!, reviewRequired: false});
+      });
+    } finally {if (!owned) lease.release();}
   }
   problem(id: string): string | null {return this.problems.get(id) ?? null;}
   snapshot(id: string): RecordSessionSnapshot | null {return this.leases.get(id)?.session.getSnapshot() ?? null;}
