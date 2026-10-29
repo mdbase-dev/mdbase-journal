@@ -14,7 +14,7 @@ test("unconfirmed creates open their records kept on this device; neither waits 
   const first = draft(drafts, f.connection.id, "First"), later = draft(drafts, f.connection.id, "Later");
   const data = new JournalData(f.connection, drafts), queue = new DraftOpens(data, drafts, () => f.connection.isCurrent(), () => {});
   try {
-    queue.request(first.id, type); queue.request(later.id, type);
+    queue.request(first.id, type, false, true); queue.request(later.id, type, false, true);
     await Promise.all([data.open(first.id, type), data.open(later.id, type)]); await settle();
     for (const value of [first, later]) {
       assert.equal(queue.state(value.id), null); assert.equal(data.snapshot(value.id)?.state, "saved_on_device");
@@ -29,7 +29,7 @@ test("failed acquisition state belongs to its draft, not its successful neighbor
   const create = mock.method(f.records, "create", async (...args: Parameters<typeof original>) => {if (args[0].body === "First") throw new Error("unknown original outcome"); return original(...args);});
   const data = new JournalData(f.connection, drafts), queue = new DraftOpens(data, drafts, () => f.connection.isCurrent(), () => {});
   try {
-    queue.request(first.id, type); queue.request(later.id, type); await data.open(later.id, type); await settle();
+    queue.request(first.id, type, false, true); queue.request(later.id, type, false, true); await data.open(later.id, type); await settle();
     assert.equal(queue.state(first.id)?.state, "unresolved"); assert.equal(queue.state(later.id), null); assert.equal(drafts.get(later.id)!.savedBody, "Later");
   } finally {queue.dispose(); data.release(); create.mock.restore(); f.close();}
 });

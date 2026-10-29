@@ -155,6 +155,7 @@ test("saved entries use the bound type and original record, without another crea
       const draft = await data.resume(entries[0]!);
       assert.equal(draft.recordId, entries[0]!.id); assert.equal(draft.createAttempt, null);
       assert.equal(draft.body, "Earlier saved entry");
+      await data.open(draft.id);
       data.setBody(draft.id, "Earlier saved entry edited"); await data.flush(draft.id);
       assert.equal((await h.records.get(draft.recordId!, {body: true})).body, "Earlier saved entry edited");
       assert.equal(spy.mock.callCount(), 0);

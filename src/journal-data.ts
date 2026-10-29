@@ -87,7 +87,6 @@ export class JournalData {
     this.ensure(); currentRecord(record, entry.id);
     const draft = await this.drafts.mutate(() => this.drafts.put({...this.drafts.blank(this.connection.id, new Date(entry.createdMs)), id: entry.id,
       created: entry.created, body: record.body!, savedBody: record.body!, path: record.path, recordId: record.id}));
-    await this.open(draft.id);
     this.ensure();
     return this.drafts.get(draft.id)!;
   }
