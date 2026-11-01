@@ -29,6 +29,7 @@ jobs:
         with:
           node-version: 22
           package-manager-cache: false
+      - run: npm ci --ignore-scripts --no-bin-links --no-audit --no-fund
       - name: Identify the exact merged train PR without write authority
         id: candidate
         env:

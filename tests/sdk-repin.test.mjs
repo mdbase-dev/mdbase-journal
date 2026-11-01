@@ -23,7 +23,7 @@ test("only the exact annotated production identity is accepted", () => {
   }
 });
 
-test("all npm pins and production SDK advance together, aliases/originals stay", () => {
+test("only npm pins advance, including preservation of the SDK file original", () => {
   const plan = repinPlan(
     [
       {
@@ -48,7 +48,7 @@ test("all npm pins and production SDK advance together, aliases/originals stay",
   );
   const changed = JSON.parse(plan.changes[0].text);
   assert.equal(changed.dependencies["@mdbase-dev/ui"], version);
-  assert.equal(changed.dependencies["@mdbase-dev/sdk"], version);
+  assert.equal(changed.dependencies["@mdbase-dev/sdk"], "file:vendor/original.tgz");
   assert.equal(changed.devDependencies["@mdbase-dev/connect-dev"], version);
   assert.equal(changed.optionalDependencies["@mdbase-dev/i18n"], version);
   assert.equal(changed.peerDependencies["@mdbase-dev/ui"], "^0.1.0-beta.140");
@@ -58,7 +58,6 @@ test("all npm pins and production SDK advance together, aliases/originals stay",
   assert.deepEqual(plan.packages, [
     "@mdbase-dev/connect-dev",
     "@mdbase-dev/i18n",
-    "@mdbase-dev/sdk",
     "@mdbase-dev/ui",
   ]);
 });
@@ -92,7 +91,7 @@ test("unexpected remote pin schemes refuse rather than silently migrate", () => 
   );
 });
 
-test("missing SDK refuses atomically; successful repin and repeat no-op use exact versions", () => {
+test("unqualified SDK refuses atomically; qualified fixture preserves file pins and repeat no-op", () => {
   const directory = mkdtempSync(join(tmpdir(), "journal-sdk-repin-"));
   try {
     const binaries = join(directory, "bin");
@@ -124,9 +123,10 @@ else console.log(JSON.stringify('${version}'));
           `
           import { repin } from ${JSON.stringify(new URL("../scripts/sdk-repin.mjs", import.meta.url).href)};
           await repin(async (name, version) => {
-            if (name === '@mdbase-dev/sdk' && process.env.MISSING_SDK === 'true') throw new Error('no partial repin');
             return {name, version, integrity: 'fixture'};
-          });
+          }, async () => {
+            if (process.env.MISSING_SDK === 'true') throw new Error('no partial repin');
+          }, async () => ({bytes: Buffer.from('qualified fixture only')}));
         `,
         ],
         {
@@ -150,7 +150,7 @@ else console.log(JSON.stringify('${version}'));
       JSON.parse(readFileSync(join(directory, "package.json"), "utf8")).dependencies[
         "@mdbase-dev/sdk"
       ],
-      version,
+      "file:original-sdk.tgz",
     );
     assert.match(readFileSync(output, "utf8"), /changed=true/);
     writeFileSync(output, "");

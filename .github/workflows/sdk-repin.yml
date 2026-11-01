@@ -77,7 +77,8 @@ jobs:
           previous=$(git ls-remote origin "refs/heads/$branch" | awk '{print $1}')
           git switch --create "$branch"
           git config user.name "${APP_SLUG}[bot]"
-          git config user.email "${APP_SLUG}[bot]@users.noreply.github.com"
+          bot_id=$(gh api "users/${APP_SLUG}[bot]" --jq .id)
+          git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
           git ls-files -z -- '*package.json' package-lock.json | xargs -0 git add --
           git diff --cached --quiet && exit 0
           git commit -m "Pin production Connect packages to $CONNECT_RELEASE"

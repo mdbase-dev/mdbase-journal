@@ -65,7 +65,7 @@ async function registryResponse(url) {
   return response;
 }
 
-export async function verifiedPackage(name, version, release, commit, verifySignature) {
+export async function verifiedPackage(name, version, release, commit, verifySignature, receiveArchive) {
   const manifest = await (
     await registryResponse(`https://registry.npmjs.org/${name.replace("/", "%2F")}/${version}`)
   ).json();
@@ -92,7 +92,14 @@ export async function verifiedPackage(name, version, release, commit, verifySign
     integrity,
     `Tarball integrity mismatch for ${name}`,
   );
+  receiveArchive?.(bytes);
   return { name, version, integrity, tarball };
+}
+
+export async function verifiedArchive(name, version, release, commit) {
+  let bytes;
+  const pkg = await verifiedPackage(name, version, release, commit, undefined, archive => { bytes = archive; });
+  return { ...pkg, bytes };
 }
 
 export function verifyLockIntegrities(lock, packages) {

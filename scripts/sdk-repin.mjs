@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { verifiedPackage, verifyLockIntegrities } from "./lib/npm-provenance.mjs";
+import { createHash } from "node:crypto";
+import { verifiedArchive, verifiedPackage, verifyLockIntegrities } from "./lib/npm-provenance.mjs";
+import { loadOriginals, protectedHashes } from "./lib/native-originals.mjs";
 
 export function productionIdentity(record, release, tag) {
   if (!/^v0\.1\.0-beta\.[1-9][0-9]*$/.test(release)) {
@@ -16,7 +18,7 @@ export function productionIdentity(record, release, tag) {
 }
 
 export function repinPlan(manifests, version) {
-  const packages = new Set(["@mdbase-dev/sdk"]);
+  const packages = new Set();
   const changes = [];
   for (const { path, text } of manifests) {
     const manifest = JSON.parse(text);
@@ -24,7 +26,7 @@ export function repinPlan(manifests, version) {
     for (const section of ["dependencies", "devDependencies", "optionalDependencies"]) {
       for (const [name, pin] of Object.entries(manifest[section] ?? {})) {
         if (!name.startsWith("@mdbase-dev/")) continue;
-        if (name !== "@mdbase-dev/sdk" && /^(file:|workspace:|link:)/.test(pin)) continue;
+        if (/^(file:|workspace:|link:)/.test(pin)) continue;
         if (/^@mdbase-dev\/sdk-/.test(name)) continue;
         if (/^(npm:|git|https?:)/.test(pin)) {
           throw new Error(`Unsupported runtime pin: ${path}: ${name}`);
@@ -51,7 +53,26 @@ function execute(...args) {
   }).trim();
 }
 
-export async function repin(verifyPackage = verifiedPackage) {
+export async function qualifySdkArchive(archive, { root = process.cwd(), env = process.env } = {}) {
+  const facts = JSON.parse(readFileSync(`${root}/vendor/native-release/production/artifact-facts.json`, "utf8"));
+  const sha256 = createHash("sha256").update(archive.bytes).digest("hex");
+  const requirements = "Need an owner-qualified production delivery packet for these exact unchanged registry bytes, matching bundled protocol original and UI, and independently supplied NATIVE_SDK_SHA256/NATIVE_UI_SHA256/NATIVE_PROTOCOL_SHA256/NATIVE_TRUST_ASSET_SHA256. Do not reuse beta.141 facts, synthesize a packet, or change a file: pin to npm.";
+  if (sha256 !== facts.sha256 || archive.integrity !== facts.sri) {
+    throw new Error(`Native SDK intake blocked: provenance-verified ${archive.name}@${archive.version} SHA256 ${sha256} does not match the qualified production original ${facts.sha256}. ${requirements}`);
+  }
+  const manifest = JSON.parse(readFileSync(`${root}/package.json`, "utf8"));
+  const pin = manifest.dependencies?.["@mdbase-dev/sdk"];
+  if (pin !== `file:vendor/${facts.archive}` || !readFileSync(`${root}/${pin.slice(5)}`).equals(archive.bytes)) {
+    throw new Error(`Native SDK intake blocked: registry archive has not been admitted as the exact file-pinned original. ${requirements}`);
+  }
+  try {
+    await loadOriginals({ target: "production", repoRoot: root, hashes: protectedHashes(env), installed: true });
+  } catch (error) {
+    throw new Error(`Native SDK intake blocked: ${error.message}. ${requirements}`);
+  }
+}
+
+export async function repin(verifyPackage = verifiedPackage, intake = qualifySdkArchive, fetchArchive = verifiedArchive) {
   const release = process.env.CONNECT_RELEASE ?? "";
   if (!/^v0\.1\.0-beta\.[1-9][0-9]*$/.test(release)) {
     throw new Error("connect_release must be v0.1.0-beta.N");
@@ -70,6 +91,7 @@ export async function repin(verifyPackage = verifiedPackage) {
     release,
     tag,
   );
+  await intake(await fetchArchive("@mdbase-dev/sdk", release.slice(1), release, commit));
   const manifests = execute("git", "ls-files", "-z", "*package.json")
     .split("\0")
     .filter(Boolean)
