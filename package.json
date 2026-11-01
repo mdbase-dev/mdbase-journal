@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build-application.mjs",
+    "build:ci": "node scripts/native-build.mjs --ci",
     "deploy:lab": "MDBASE_ENV=lab node scripts/deploy-lab.mjs",
     "build:local": "node scripts/build-application.mjs --writing-only",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
@@ -13,6 +14,7 @@
     "icons": "node scripts/icons.mjs",
     "dev": "python3 -m http.server -d public 8765",
     "test": "node scripts/test.mjs",
+    "test:sdk-intake:live": "JOURNAL_TEST_REAL_SDK=1 node --test tests/sdk-intake-live.test.mjs",
     "test:publisher": "node --test tests/native-publish-bytes.test.mjs tests/native-publisher-policy.test.mjs tests/native-originals.test.mjs tests/native-artifact.test.mjs tests/native-hosting.test.mjs tests/native-tag.test.mjs tests/native-tool.test.mjs"
   },
   "dependencies": {
@@ -30,6 +32,7 @@
     "@types/react-dom": "19.2.3",
     "esbuild": "0.28.1",
     "jsdom": "26.1.0",
+    "sigstore": "4.1.1",
     "typescript": "5.9.3"
   }
 }

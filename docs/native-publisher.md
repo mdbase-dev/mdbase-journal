@@ -100,10 +100,21 @@ External owners must protect reviewed release refs/workflow source and immutable
 tags against update/deletion/force/bypass. YAML cannot establish immutability or
 source review. Environment deployment policy must admit the **tag event target**,
 not just `release/native-*` branch events. Environments are `journal-staging` and
-`journal-production`. **Separate Callum GO before any production tag creation or
-dispatch**; then protected production UI approval with Callum required reviewer
-and no admin bypass. This is NOT a prevent-self-review requirement. Never use a
-pending-deployments API, approval hash or machine approval substitute.
+`journal-production`. Callum's October 30, 2026 weekly-train approval supersedes
+the historical required-reviewer/manual-GO policy for an exact merged release-App
+repin after successful required main CI. The new handoff advances the production
+release HEAD and creates its exact immutable tag atomically; it never dispatches
+or bypasses this publisher. See [weekly app train](weekly-app-train.md) for the
+API-verified policies and remaining npm-original qualification blockers.
+Actual enforcement as of November 2: ruleset `26312904` restricts creation of
+`refs/tags/native-publish-production-*`, with only repository-admin role ID `5`
+able to bypass (`always`). No release App bypass exists yet; Callum is arranging
+installation and will add it. The environment admits matching tags, has no
+required reviewers and disables environment-admin bypass. Repository admins can
+bypass the tag-creation restriction; **no separate manual-GO approval is
+mechanically enforced**. Ruleset `26307053` independently blocks all native tag
+updates/deletions with no bypass actors. This revision changes no settings.
+Never use a pending-deployments API, approval hash or machine approval substitute.
 
 ## Build once, isolate upload
 
