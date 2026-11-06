@@ -92,11 +92,21 @@ export async function buildApplication({writingOnly=false,env=process.env,output
   const grant=await build({stdin:{contents:'export {deliverAppGrantCallback} from "@mdbase-dev/sdk/app-grant";',resolveDir:root,loader:"js"},bundle:true,platform:"browser",format:"esm",target:"es2022",
     outfile:resolve(output,"sdk/application/app-grant.js"),metafile:true});
   for(const value of Object.values(grant.metafile.outputs))assert.deepEqual(value.imports,[]);
+  const commit=env.JOURNAL_BUILD_COMMIT;
+  if(commit!==undefined&&!/^[a-f0-9]{40}$/.test(commit))throw new Error("Full Journal build commit required");
+  const entry=commit?`assets/index-journal-${commit.slice(0,12)}.js`:"journal.js";
+  const sdkEntry=commit?"../sdk/application/sdk.js":"./sdk/application/sdk.js";
+  const grantEntry=commit?"../sdk/application/app-grant.js":"./sdk/application/app-grant.js";
   const app=await build({absWorkingDir:root,entryPoints:["src/main.ts"],bundle:true,platform:"browser",format:"esm",target:"es2022",
-    outfile:resolve(output,"journal.js"),metafile:true,define:{JOURNAL_APPLICATION_INPUTS:JSON.stringify(inputs),"process.env.NODE_ENV":JSON.stringify("production")},
-    plugins:[{name:"public-sdk-entry",setup(builder){builder.onResolve({filter:/^@mdbase-dev\/sdk$/},()=>({path:"./sdk/application/sdk.js",external:true}));
-      builder.onResolve({filter:/^@mdbase-dev\/sdk\/app-grant$/},()=>({path:"./sdk/application/app-grant.js",external:true}));
+    outfile:resolve(output,entry),metafile:true,define:{JOURNAL_APPLICATION_INPUTS:JSON.stringify(inputs),"process.env.NODE_ENV":JSON.stringify("production")},
+    plugins:[{name:"public-sdk-entry",setup(builder){builder.onResolve({filter:/^@mdbase-dev\/sdk$/},()=>({path:sdkEntry,external:true}));
+      builder.onResolve({filter:/^@mdbase-dev\/sdk\/app-grant$/},()=>({path:grantEntry,external:true}));
       if(manifest)builder.onLoad({filter:/[\\/]public[\\/]\.well-known[\\/]mdbase-app\.json$/},()=>({contents:JSON.stringify(manifest),loader:"json"}));}}]});
+  if(commit){
+    const path=resolve(output,"index.html"),html=await readFile(path,"utf8"),needle='<script type="module" src="/journal.js"></script>';
+    if(html.split(needle).length!==2)throw new Error("Unique Journal entry marker required");
+    await writeFile(path,html.replace(needle,`<script type="module" src="/${entry}"></script>`));
+  }
   if(manifest)await writeJournalManifest(manifest,output);
   // The shared collection UI's stylesheet, served beside journal.css (which maps its tokens).
   // Bundled, because it @imports sibling stylesheets the output does not otherwise contain.
@@ -105,8 +115,8 @@ export async function buildApplication({writingOnly=false,env=process.env,output
   await assertStylesheetsShipped(output);
   const imports=Object.values(app.metafile.outputs)[0].imports;
   assert(imports.length>0);
-  assert.deepEqual([...new Set(imports.filter(x=>x.kind!=="dynamic-import").map(x=>x.path))],["./sdk/application/sdk.js"]);
-  assert.deepEqual(imports.filter(x=>x.kind==="dynamic-import").map(x=>x.path),["./sdk/application/app-grant.js"]);
+  assert.deepEqual([...new Set(imports.filter(x=>x.kind!=="dynamic-import").map(x=>x.path))],[sdkEntry]);
+  assert.deepEqual(imports.filter(x=>x.kind==="dynamic-import").map(x=>x.path),[grantEntry]);
   return {sourceCommit:pin.sourceCommit,writingOnly,inputs,sdk: sdk.metafile,application:app.metafile};
 }
 if(process.argv[1]===fileURLToPath(import.meta.url)){

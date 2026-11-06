@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { installedMembers, originalMembers } from '../scripts/lib/native-originals.mjs';
+import { installedMembers, originalMembers } from '../scripts/publisher/originals.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url));
 export async function legacyLabFixture() {
  const dir=await mkdtemp(join(root,'.application-build-legacy-lab-'));

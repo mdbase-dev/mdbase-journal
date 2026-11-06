@@ -3,9 +3,9 @@
 // LAB is approved and live; keep it untouched. Callum approved Journal's
 // Pages project mdbase-journal and staging/production domains on 2026-10-20.
 // `configured` records the approved hosting target, NOT a deployment receipt
-// or permission to publish production. Staging may publish only qualified
-// environment-bound bytes; production still needs separate Callum GO and a
-// protected publisher. Connect origins are the exact per-environment values
+// or permission to bypass App CD. Staging and production publish exact-source
+// green main through ops App CD and the protected publisher, without per-publish
+// GO or UI approval. Connect origins are the exact per-environment values
 // the authenticated SDK release trust must carry; CP/log authority comes
 // from that trust, never from these deployment labels.
 const target=(origin,connectOrigin,project,branch,configured)=>Object.freeze({origin,connectOrigin,project,branch,configured});
