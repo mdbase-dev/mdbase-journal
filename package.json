@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build-application.mjs",
-    "build:ci": "node scripts/native-build.mjs --ci",
+    "build:ci": "node scripts/publisher/rehearsal.mjs production",
+    "build:publisher": "node scripts/publisher/rehearsal.mjs",
     "deploy:lab": "MDBASE_ENV=lab node scripts/deploy-lab.mjs",
     "build:local": "node scripts/build-application.mjs --writing-only",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
@@ -14,12 +15,11 @@
     "icons": "node scripts/icons.mjs",
     "dev": "python3 -m http.server -d public 8765",
     "test": "node scripts/test.mjs",
-    "test:sdk-intake:live": "JOURNAL_TEST_REAL_SDK=1 node --test tests/sdk-intake-live.test.mjs",
-    "test:publisher": "node --test tests/native-publish-bytes.test.mjs tests/native-publisher-policy.test.mjs tests/native-originals.test.mjs tests/native-artifact.test.mjs tests/native-hosting.test.mjs tests/native-tag.test.mjs tests/native-tool.test.mjs"
+    "test:publisher": "node --test --test-concurrency=1 scripts/publisher/*.test.mjs tests/native-publish-bytes.test.mjs tests/native-hosting.test.mjs"
   },
   "dependencies": {
-    "@mdbase-dev/connect-protocol": "file:vendor/mdbase-dev-connect-protocol-0.1.0-beta.129-c280cd194ffd.tgz",
-    "@mdbase-dev/sdk": "file:vendor/sdk-eaa4e697-production-beta141.tgz",
+    "@mdbase-dev/connect-protocol": "file:vendor/mdbase-dev-connect-protocol-0.1.0-beta.145-e6e66bcd172f.tgz",
+    "@mdbase-dev/sdk": "file:vendor/sdk-493d29ca-production-beta157.tgz",
     "@mdbase-dev/ui": "file:vendor/ui-dev-fe158b59.tgz",
     "react": "19.2.8",
     "react-dom": "19.2.8"
