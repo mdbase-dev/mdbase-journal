@@ -2,14 +2,13 @@
 import {cp,lstat,mkdir,readFile,realpath,writeFile} from 'node:fs/promises';
 import {dirname,join} from 'node:path';
 import {createHash} from 'node:crypto';
+import {pathToFileURL} from 'node:url';
 import {compareInstalled} from './originals.mjs';
 import {publicationInventory,serializeInventory} from './publisher.mjs';
 import {headersPolicy,redirectsPolicy} from './hosting-policy.mjs';
 const root=process.cwd(),output=process.argv[2],plan=JSON.parse(await readFile(join(output,'plan.json'),'utf8'));
 await compareInstalled(root,plan.sdkTrust.archives);
-const {buildApplication}=await import('../build-application.mjs');
-const {buildOfflineShell}=await import('@mdbase-dev/sdk/offline-shell/build');
-const {validateAppManifest}=await import('@mdbase-dev/connect-protocol/manifest');
+const {buildApplication,buildOfflineShell,validateAppManifest}=await import(pathToFileURL(join(root,'scripts/publisher/candidate-build.mjs')).href);
 const publish=join(output,'publish');await mkdir(publish);
 for(const path of plan.publicFiles) {
  if(!path.startsWith('public/')||path.split('/').includes('..'))throw Error('Unsafe static source');
