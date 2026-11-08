@@ -3,11 +3,11 @@ import {createHash} from 'node:crypto';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {publicBytes} from './authentication.mjs';
+import {archiveBytes} from './authentication.mjs';
 export async function prepareInstall(plan,root=process.cwd(),fetchImpl=fetch) {
  if(plan.target==='production')return;
  if(plan.target!=='staging')throw Error('Unknown install target');
- const original=plan.sdkTrust.archives.sdk,bytes=await publicBytes(plan.sdkTrust.stagingUrl,fetchImpl);
+ const original=plan.sdkTrust.archives.sdk,bytes=await archiveBytes(plan.sdkTrust.stagingUrl,fetchImpl);
  if(createHash('sha256').update(bytes).digest('hex')!==original.sha256)throw Error('Staging original changed');
  const pkgPath=join(root,'package.json'),lockPath=join(root,'package-lock.json');
  const pkg=JSON.parse(await readFile(pkgPath,'utf8')),lockBytes=await readFile(lockPath),lock=JSON.parse(lockBytes);

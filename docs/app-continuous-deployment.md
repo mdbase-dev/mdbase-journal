@@ -21,8 +21,8 @@ producer identity and the same producer's signed staging archive, then binds
 packaged target/origins, raw protected trust hash, native/SQLite assets, frozen
 npm inputs and complete installed originals. Staging derives an ephemeral npm
 install from that authenticated archive; committed production inputs stay intact.
-The read token is scoped to workflow-owned data-only guards and nonredirecting
-GitHub API reads, never registry/blob hosts or candidate install/build execution.
+The read token is scoped to workflow-owned SDK intake and API checks, never
+registry/blob hosts or candidate dependency/application execution.
 
 Protected upload executes only workflow-owned helpers and isolated pinned tools.
 It verifies immutable same-run artifact ID/digest/source/tree/target and the full
@@ -72,3 +72,30 @@ in `config/sdk-publication.json`). Production trust bytes are unchanged; staging
 differs from the retired asset only in issuance/source attribution. Roots, policy
 keys, origins, signing identities and all user data are unchanged. A real change
 to any of those trust/signing boundaries must return to the owner.
+
+## Authenticated SDK intake
+
+When `GITHUB_TOKEN` is present, SDK release metadata and staging archive/bundle
+bytes use GitHub REST. Asset bytes use
+`/repos/mdbase-dev/mdbase-connect/releases/assets/<id>` with
+`Accept: application/octet-stream` and Bearer authentication. Without a token,
+assets use their exact `browser_download_url`; authenticated failures never fall
+back anonymously. Exact asset names and browser URLs, SHA256 digests, and the
+repository/workflow/ref/source attestation identity remain mandatory. npm and
+unrelated archive hosts never receive the token; tokens and asset IDs are not
+persisted in plans.
+
+Staging installation uses the same transport. Journal then compares the downloaded
+local original archive and all installed members, preserving its existing local
+custody gate; it does not re-download originals during comparison. The workflow
+supplies the read-only job token only to intake, installation and comparison,
+alongside existing workflow-owned API checks. The build wrapper deletes it after
+the original gate and before dynamic candidate imports. Dependency installation
+itself does not receive it. All jobs
+inherit `actions: read` and `contents: read`, with no write overrides.
+
+Transient reads retain retryable 403/408/429/5xx responses and network failures,
+with waits of 5, 20, 60 and 120 seconds and a 30-second per-attempt timeout. One
+read permits five attempts over 355 seconds; the protected guard step allows
+seven minutes. Existing job deadlines and upload/recovery constraints are
+unchanged.
