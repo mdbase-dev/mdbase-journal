@@ -8,6 +8,7 @@ import {publicationInventory,serializeInventory} from './publisher.mjs';
 import {headersPolicy,redirectsPolicy} from './hosting-policy.mjs';
 const root=process.cwd(),output=process.argv[2],plan=JSON.parse(await readFile(join(output,'plan.json'),'utf8'));
 await compareInstalled(root,plan.sdkTrust.archives);
+delete process.env.GITHUB_TOKEN;
 const {buildApplication,buildOfflineShell,validateAppManifest}=await import(pathToFileURL(join(root,'scripts/publisher/candidate-build.mjs')).href);
 const publish=join(output,'publish');await mkdir(publish);
 for(const path of plan.publicFiles) {
