@@ -21,6 +21,7 @@ jobs:
         with:
           node-version: 22
           package-manager-cache: false
+      - run: npm run check:release-downloads && npm run test:release-downloads
       - run: npm ci --ignore-scripts --no-bin-links --no-audit --no-fund
       - run: npm run typecheck
       - run: npm test

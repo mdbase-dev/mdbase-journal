@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "check:release-downloads": "node scripts/check-release-downloads.mjs",
+    "test:release-downloads": "node --test scripts/check-release-downloads.test.mjs",
     "build": "node scripts/build-application.mjs",
     "build:ci": "node scripts/publisher/rehearsal.mjs production",
     "build:publisher": "node scripts/publisher/rehearsal.mjs",
