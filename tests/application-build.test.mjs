@@ -13,7 +13,7 @@ test("native build requires environment and exact origin; the ID defaults to the
   const env={JOURNAL_REGISTERED_APPLICATION_ID:"build-fixture-only",JOURNAL_ENVIRONMENT:"lab",JOURNAL_ORIGIN:"https://journal.fixture"};
   for(const key of ["JOURNAL_ENVIRONMENT","JOURNAL_ORIGIN"]){const absent={...env};delete absent[key];assert.throws(()=>applicationInputs(absent),/require/);}
   const {JOURNAL_REGISTERED_APPLICATION_ID:_,...withoutId}=env;
-  assert.equal(applicationInputs(withoutId).registeredApplicationId,"dev.mdbase.journal-prototype");
+  assert.equal(applicationInputs(withoutId).registeredApplicationId,"dev.mdbase.journal");
   for(const origin of ["https://journal.fixture/path","https://journal.fixture?x=1","http://journal.fixture","https://user@journal.fixture"])
     assert.throws(()=>applicationInputs({...env,JOURNAL_ORIGIN:origin}),/origin/);
   assert.throws(()=>applicationInputs({...env,JOURNAL_ENVIRONMENT:"production",JOURNAL_ORIGIN:"http://localhost:3000"}),/origin/);

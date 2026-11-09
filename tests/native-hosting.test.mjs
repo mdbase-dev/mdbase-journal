@@ -87,7 +87,7 @@ test('full coverage binds exact native filenames, trust module and final offline
  const relocated=f.inventory.map(a=>a.path==='sdk/native/runtime.wasm'?{...a,path:'runtime.wasm'}:a);assert.throws(()=>assertCoverage(relocated,f.plan),/exact native/);
 });
 test('manifest retains exact app/grant target callback; no loopback or wrong environment',()=>{
- const f=fixture(),manifest={manifest_version:1,id:'dev.mdbase.journal-prototype',homepage:origin+'/',redirect_uris:[origin+'/auth/mdbase/callback'],installation_origins:{staging:{'app-runtime':[origin]}}};
+ const f=fixture(),manifest={manifest_version:1,id:'dev.mdbase.journal',homepage:origin+'/',redirect_uris:[origin+'/auth/mdbase/callback'],installation_origins:{staging:{'app-runtime':[origin]}}};
  assertBuiltManifest(manifest,f.plan);
  for(const patch of [{homepage:'https://journal.mdbase.dev/'},{id:'other'},{redirect_uris:[origin+'/']},{installation_origins:{staging:{'app-runtime':['http://localhost:8765']}}}])assert.throws(()=>assertBuiltManifest({...manifest,...patch},f.plan),/refusal/);
 });

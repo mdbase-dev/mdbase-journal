@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
-  "id": "dev.mdbase.journal-prototype",
-  "name": "Journal (prototype)",
+  "id": "dev.mdbase.journal",
+  "name": "Journal",
   "homepage": "https://mdbase-journal.callum-artifacts.pages.dev/",
   "icon": "https://mdbase-journal.callum-artifacts.pages.dev/pwa-512.png",
   "redirect_uris": [

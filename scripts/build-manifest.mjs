@@ -19,7 +19,7 @@ import { JOURNAL_DEPLOYMENT_TARGETS, journalInstallationOrigins } from "./deploy
  * `JOURNAL_ORIGIN` sets the homepage; without it, the pages.dev origin is used.
  */
 
-export const JOURNAL_MANIFEST_ID = "dev.mdbase.journal-prototype";
+export const JOURNAL_MANIFEST_ID = "dev.mdbase.journal";
 export const DEFAULT_JOURNAL_ORIGIN = "https://mdbase-journal.callum-artifacts.pages.dev";
 
 const root = resolve(import.meta.dirname, "..");
@@ -78,7 +78,7 @@ export async function buildJournalManifest({ origin = DEFAULT_JOURNAL_ORIGIN, al
   const manifest = {
     manifest_version: 1,
     id: JOURNAL_MANIFEST_ID,
-    name: "Journal (prototype)",
+    name: "Journal",
     homepage,
     icon: new URL("pwa-512.png", homepage).href,
     redirect_uris: [new URL("auth/mdbase/callback", homepage).href],
