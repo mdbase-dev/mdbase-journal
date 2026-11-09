@@ -9,5 +9,5 @@ export function assertInventoryCoverage(inventory,sdkTrust) {
 }
 export function assertBuiltTarget({target,manifest}) {
  const origin={staging:'https://staging.mdbase-journal.pages.dev',production:'https://journal.mdbase.dev'}[target];
- if(!origin||manifest.id!=='dev.mdbase.journal-prototype'||manifest.homepage!==origin+'/'||manifest.redirect_uris?.length!==1||manifest.redirect_uris[0]!==origin+'/auth/mdbase/callback'||manifest.installation_origins?.[target]?.['app-runtime']?.length!==1||manifest.installation_origins[target]['app-runtime'][0]!==origin)throw Error('Journal publisher refusal: invalid exact Journal target manifest');
+ if(!origin||manifest.id!=='dev.mdbase.journal'||manifest.homepage!==origin+'/'||manifest.redirect_uris?.length!==1||manifest.redirect_uris[0]!==origin+'/auth/mdbase/callback'||manifest.installation_origins?.[target]?.['app-runtime']?.length!==1||manifest.installation_origins[target]['app-runtime'][0]!==origin)throw Error('Journal publisher refusal: invalid exact Journal target manifest');
 }
