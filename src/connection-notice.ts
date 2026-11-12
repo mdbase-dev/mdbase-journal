@@ -19,6 +19,6 @@ export function connectionNotice(snapshot: Observed | null | undefined, online =
   const health = snapshot.sync?.health ?? snapshot.transport?.kind ?? null;
   if (!online || health === "offline") return "offline";
   if (health === "unreachable" || health === "server_busy" || health === "rate_limited" ||
-    snapshot.sync?.connection === "offline" || snapshot.sync?.connection === "reconnecting" || (snapshot.sync?.live ?? snapshot.live) === false) return "reconnecting";
+    snapshot.sync?.connection === "offline" || (snapshot.sync?.live ?? snapshot.live) === false) return "reconnecting";
   return null;
 }
