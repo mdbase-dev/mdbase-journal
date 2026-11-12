@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import {mock, test} from "node:test";
 import {readFileSync} from "node:fs";
 import {JSDOM} from "jsdom";
-import type {Mdbase} from "@mdbase-dev/sdk";
-import {connect, type MdbaseClient} from "@mdbase-dev/sdk/thin-client";
+import type {Mdbase, MdbaseClient} from "@mdbase-dev/sdk";
 import {JournalDrafts, type DraftLock} from "../src/drafts.js";
 import {mountJournal} from "../src/view.js";
 import {JournalData} from "../src/journal-data.js";
@@ -15,7 +14,7 @@ async function until(check: () => boolean): Promise<void> {
 }
 async function tabs(delayCatalog = false) {
   const f = await applicationFixture();
-  const peer = await connect({connector: f.replica.connector(), app: {name: "peer-journal-tab", version: "test"}, reconnect: false});
+  const peer = await f.replica.client();
   const locks = memoryLocks(), storage = memoryStorage();
   let tail = Promise.resolve(), pause: Promise<void> | null = null;
   const lock: DraftLock = operation => {const barrier = pause, next = tail.then(async () => {if (barrier) await barrier; return operation();}); tail = next.then(() => {}, () => {}); return next;};
@@ -111,7 +110,7 @@ test("closing the owner hands its latest unfinished draft to an idle tab", async
     assert.equal(b.drafts.get(id)?.body, full); assert.equal(b.drafts.get(id)?.savedBody, full);
     assert.equal(createB.mock.callCount(), 0, "takeover retains the original create identity");
     assert.equal(b.page.value, "", "background recovery leaves the idle page alone");
-    fresh = await connect({connector: f.replica.connector(), app: {name: "reloaded-journal-tab", version: "test"}, reconnect: false});
+    fresh = await f.replica.client();
     mock.method(fresh, "describe", async () => catalog());
     reloaded = await t.tab(t.application(fresh));
     await until(() => reloaded!.window.document.getElementById("status")!.textContent === "Saved");
