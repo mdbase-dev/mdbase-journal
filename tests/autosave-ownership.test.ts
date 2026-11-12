@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {mock, test} from "node:test";
 import {readFileSync} from "node:fs";
 import {JSDOM} from "jsdom";
-import {connect, type Mdbase, type MdbaseClient} from "@mdbase-dev/sdk";
+import type {Mdbase, MdbaseClient} from "@mdbase-dev/sdk";
 import {JournalDrafts, type DraftLock} from "../src/drafts.js";
 import {mountJournal} from "../src/view.js";
 import {JournalData} from "../src/journal-data.js";
@@ -14,7 +14,7 @@ async function until(check: () => boolean): Promise<void> {
 }
 async function tabs(delayCatalog = false) {
   const f = await applicationFixture();
-  const peer = await connect({connector: f.replica.connector(), app: {name: "peer-journal-tab", version: "test"}, reconnect: false});
+  const peer = await f.replica.client();
   const locks = memoryLocks(), storage = memoryStorage();
   let tail = Promise.resolve(), pause: Promise<void> | null = null;
   const lock: DraftLock = operation => {const barrier = pause, next = tail.then(async () => {if (barrier) await barrier; return operation();}); tail = next.then(() => {}, () => {}); return next;};
@@ -79,7 +79,7 @@ test("idle status sweep never autosaves a peer prefix; owner saves the complete 
     try {assert.equal((await passive.session.flush()).ok, true);} finally {passive.release();}
     assert.equal((await lease.session.flush()).ok, true);
     await until(() => a.window.document.getElementById("status")!.textContent === "Saved");
-    assert.equal((await f.records.get(recordId, {body: true})).body, full);
+    assert.equal((await f.records.get(recordId, {include: {body: true}})).body, full);
     assert.equal(a.page.value, full); assert.equal(a.drafts.get(id)?.body, full);
     assert.equal(a.window.document.getElementById("draft-conflict")!.hidden, true);
     assert.equal(b.view.currentDraft().id, blank); assert.equal(b.page.value, "");
@@ -106,12 +106,11 @@ test("closing the owner hands its latest unfinished draft to an idle tab", async
     assert.equal((await lease.session.flush()).ok, true);
     await until(() => b.drafts.get(id)?.savedBody === full);
     assert.equal(updateB.mock.callCount(), 1);
-    assert.equal((await f.records.get(recordId, {body: true})).body, full);
+    assert.equal((await f.records.get(recordId, {include: {body: true}})).body, full);
     assert.equal(b.drafts.get(id)?.body, full); assert.equal(b.drafts.get(id)?.savedBody, full);
     assert.equal(createB.mock.callCount(), 0, "takeover retains the original create identity");
     assert.equal(b.page.value, "", "background recovery leaves the idle page alone");
-    fresh = await connect({connector: f.replica.connector(), app: {name: "reloaded-journal-tab", version: "test"}, reconnect: false});
-    mock.method(fresh, "describe", async () => catalog());
+    fresh = await f.replica.client();
     reloaded = await t.tab(t.application(fresh));
     await until(() => reloaded!.window.document.getElementById("status")!.textContent === "Saved");
     const resumed = await fresh.records.open(recordId, {autosave: {idleMs: 1200}});
@@ -162,7 +161,7 @@ test("the owner follows peer edits to its previous page without a second session
     a.storage(id, previous);
     await until(() => lease!.session.getSnapshot().body === full);
     assert.equal((await lease.session.flush()).ok, true);
-    assert.equal((await f.records.get(recordId, {body: true})).body, full);
+    assert.equal((await f.records.get(recordId, {include: {body: true}})).body, full);
     assert.equal(updateB.mock.callCount(), 0);
     assert.equal(a.page.value, "");
   } finally {lease?.release(); follower?.close(); await t.close();}
@@ -203,7 +202,7 @@ test("an independent editor still conflicts and local text is discarded only by 
     a.window.document.getElementById("use-saved-version")!.click();
     await until(() => a.page.value === "Independent edit");
     assert.equal(a.drafts.get(id)?.body, "Independent edit");
-    assert.equal((await f.records.get(recordId, {body: true})).body, "Independent edit");
+    assert.equal((await f.records.get(recordId, {include: {body: true}})).body, "Independent edit");
   } finally {active?.release(); editor?.release(); await t.close();}
 });
 test("a delayed peer edit of a hidden page cannot borrow a later outside revision", async () => {
@@ -228,7 +227,7 @@ test("a delayed peer edit of a hidden page cannot borrow a later outside revisio
     a.storage(id, previous);
     await until(() => a.drafts.get(id)?.reviewRequired === true);
     assert.equal((await active.session.flush()).ok, true);
-    assert.equal((await f.records.get(recordId, {body: true})).body, "Independent edit");
+    assert.equal((await f.records.get(recordId, {include: {body: true}})).body, "Independent edit");
     assert.equal(a.drafts.get(id)?.body, full);
     assert.equal(follower.page.value, full);
   } finally {active?.release(); editor?.release(); follower?.close(); await t.close();}
@@ -250,7 +249,7 @@ test("queued input on the current page cannot skip the previous page's last peer
     t.pause(null); gate.resolve();
     await until(() => active!.session.getSnapshot().body === full);
     assert.equal((await active.session.flush()).ok, true);
-    assert.equal((await f.records.get(recordId, {body: true})).body, full);
+    assert.equal((await f.records.get(recordId, {include: {body: true}})).body, full);
   } finally {t.pause(null); gate.resolve(); active?.release(); follower?.close(); await t.close();}
 });
 for (const hideOwner of [true, false]) test(`a conflict is recoverable from another tab (owner ${hideOwner ? "hidden" : "displayed"})`, async () => {
@@ -282,7 +281,7 @@ for (const hideOwner of [true, false]) test(`a conflict is recoverable from anot
       follower.write("Independent edit continued");
       await until(() => resumed.session.getSnapshot().body === follower!.page.value);
       assert.equal((await resumed.session.flush()).ok, true);
-      assert.equal((await f.records.get(recordId, {body: true})).body, follower.page.value);
+      assert.equal((await f.records.get(recordId, {include: {body: true}})).body, follower.page.value);
       assert.equal(a.drafts.get(id)?.reviewRequired, false);
     } finally {resumed.release();}
   } finally {active?.release(); editor?.release(); follower?.close(); await t.close();}

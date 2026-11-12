@@ -36,14 +36,14 @@ test("legacy text is accessible and editable locally once, with no original stor
 test("same-scope readiness notifications cannot clear restored writing pinned to another collection", async () => {
   const f = await applicationFixture(), h = dom(), storage = memoryStorage();
   storage.setItem("journal.note.earlier", JSON.stringify({body: "Original earlier text", targetCollectionId: "another-original-collection", path: "original.md"}));
-  const describe = mock.method(f.records, "describe", async () => catalog()), create = mock.method(f.records, "create");
+  const create = mock.method(f.records, "create");
   const view = mountJournal(h.window.document, new JournalDrafts(storage), f.mdbase);
   h.window.document.querySelector<HTMLButtonElement>("#pending-details button")!.click();
   const id = view.currentDraft().id;
   f.fixture.controls.publishSnapshot({...f.ready, readiness: {...f.ready.readiness, checking: true}});
   assert.equal(view.currentDraft().id, id); assert.equal(h.page.value, "Original earlier text");
   assert.equal(view.currentDraft().targetCollectionId, "another-original-collection"); assert.equal(create.mock.callCount(), 0);
-  view.dispose(); describe.mock.restore(); create.mock.restore(); h.window.close(); f.close();
+  view.dispose(); create.mock.restore(); h.window.close(); f.close();
 });
 test("entry type selection is restored only from the current canonical catalog and survives reload", async () => {
   const f = await applicationFixture(), h = dom(), storage = memoryStorage(), drafts = new JournalDrafts(storage);
@@ -69,7 +69,7 @@ test("a removed saved type remains unselected rather than inventing a mapping", 
 });
 test("an older uncertain entry does not replace the new page's truthful Saved state", {timeout: 10_000}, async () => {
   const f = await applicationFixture(), h = dom(), drafts = new JournalDrafts(memoryStorage());
-  const describe = mock.method(f.records, "describe", async () => catalog()), original = f.records.create.bind(f.records);
+  const original = f.records.create.bind(f.records);
   const create = mock.method(f.records, "create", async (...args: Parameters<typeof original>) => {if (args[0].body === "First") throw new Error("unknown original outcome"); return original(...args);});
   const saved = deferred<void>(), status = h.window.document.getElementById("status")!;
   const observer = new h.window.MutationObserver(() => {if (status.textContent === "Saved") saved.resolve();});
@@ -83,5 +83,5 @@ test("an older uncertain entry does not replace the new page's truthful Saved st
     assert.equal(h.window.document.getElementById("status")!.textContent, "Saved");
     assert.match(h.window.document.getElementById("pending-details")!.textContent!, /Original save unresolved/);
     assert.equal(create.mock.callCount(), 2); assert.notEqual(first.path, view.currentDraft().path);
-  } finally {observer.disconnect(); view.dispose(); describe.mock.restore(); create.mock.restore(); h.window.close(); f.close();}
+  } finally {observer.disconnect(); view.dispose(); create.mock.restore(); h.window.close(); f.close();}
 });

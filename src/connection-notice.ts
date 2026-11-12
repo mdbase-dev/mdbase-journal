@@ -12,13 +12,13 @@ export const connectionNoticeLabels: Record<ConnectionNotice, string> = {
   reconnecting: "Reconnecting",
   saved_on_device: "Saved on this device; waiting for sync",
 };
-type Observed = Partial<Pick<MdbaseSnapshot, "phase" | "sync" | "writes" | "transport" | "live">>;
+type Observed = Partial<Pick<MdbaseSnapshot, "phase" | "sync" | "transport" | "live">>;
 export function connectionNotice(snapshot: Observed | null | undefined, online = true): ConnectionNotice | null {
   if (!snapshot || (snapshot.phase && snapshot.phase.kind !== "ready")) return null;
-  if (snapshot.writes?.saveState === "saved_on_device") return "saved_on_device";
+  if (snapshot.sync?.writes?.saveState === "saved_on_device") return "saved_on_device";
   const health = snapshot.sync?.health ?? snapshot.transport?.kind ?? null;
   if (!online || health === "offline") return "offline";
   if (health === "unreachable" || health === "server_busy" || health === "rate_limited" ||
-    snapshot.sync?.kind === "offline" || (snapshot.sync?.live ?? snapshot.live) === false) return "reconnecting";
+    snapshot.sync?.connection === "offline" || (snapshot.sync?.live ?? snapshot.live) === false) return "reconnecting";
   return null;
 }

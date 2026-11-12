@@ -1,17 +1,17 @@
-import {revisionOf, uuidv7, type MdbaseApplicationConnection, type RecordLease, type RecordSessionSnapshot, type wire, type FileRef} from "@mdbase-dev/sdk";
+import {revisionOf, uuidv7, type DescribeResult, type MdbaseApplicationConnection, type RecordLease, type RecordSessionSnapshot, type RecordView, type FileRef} from "@mdbase-dev/sdk";
 import {JournalDrafts, type JournalDraft} from "./drafts.js";
 export const JOURNAL_CONTRACT = Object.freeze({id: "journal.entry", version: "0.1.0", digest: "sha256:7e95bdf03621919fb0e722e5a29b48a68d7a4eaa3a94aea033d96ea2f7ec34cc"});
 export interface JournalEntryType {readonly name: string; readonly createdField: string}
 export interface JournalEntry {readonly id: string; readonly created: string; readonly createdMs: number; readonly path: string}
 /** Only current canonical catalog bindings, never the starter type name. */
-export function journalEntryTypes(catalog: wire.DescribeResult): JournalEntryType[] {
+export function journalEntryTypes(catalog: DescribeResult): JournalEntryType[] {
   const contract = catalog.contracts.filter(c => c.id === JOURNAL_CONTRACT.id && c.version === JOURNAL_CONTRACT.version && c.digest === JOURNAL_CONTRACT.digest);
   if (contract.length !== 1) throw new Error("This collection does not provide the required Journal contract.");
   const types: JournalEntryType[] = [];
   for (const type of catalog.types) {
     const implementations = type.implements.filter(i => i.contract === JOURNAL_CONTRACT.id && i.version === JOURNAL_CONTRACT.version);
     if (implementations.length > 1) throw new Error("This collection has an ambiguous Journal type binding.");
-    const field = implementations[0]?.fields.get("created");
+    const field = implementations[0]?.fields["created"];
     if (field === undefined) continue;
     // The native public create API accepts top-level fields. Do not implement a
     // second field-reference parser or silently write a dotted literal key.
@@ -24,7 +24,7 @@ export function journalEntryTypes(catalog: wire.DescribeResult): JournalEntryTyp
 }
 /** A readable original record: confirmed, or kept on this device while the SDK
  * write ledger settles it. Never a protected or inconsistent readback. */
-function currentRecord(record: wire.RecordView, id: string): void {
+function currentRecord(record: RecordView, id: string): void {
   if (record.id !== id || (record.state.state !== "confirmed" && record.state.state !== "pending") || record.state.hold !== undefined || (record.state.unresolved ?? 0) !== 0 ||
       typeof record.body !== "string" || typeof record.document !== "string" || revisionOf(record.document) !== record.revision) {
     throw new Error("Keep this note on this device until its original record can be read safely.");
@@ -60,18 +60,18 @@ export class JournalData {
   }
   async types(): Promise<JournalEntryType[]> {
     this.ensure();
-    const catalog = await this.connection.records.describe(this.caller.signal);
+    const catalog = await this.connection.records.describe({signal: this.caller.signal});
     this.ensure();
     return journalEntryTypes(catalog);
   }
   async entries(types: JournalEntryType[]): Promise<JournalEntry[]> {
     this.ensure();
     const entries: JournalEntry[] = [];
-    for await (const page of this.connection.records.pages({types: types.map(type => type.name)}, {}, this.caller.signal)) {
+    for await (const page of this.connection.records.pages({types: types.map(type => type.name)}, {signal: this.caller.signal})) {
       this.ensure();
       for (const record of page.records) {
         const type = types.find(type => record.types.includes(type.name));
-        const created = type ? record.frontmatter.get(type.createdField) : null;
+        const created = type ? record.frontmatter[type.createdField] : null;
         if (typeof created !== "string" || !Number.isFinite(Date.parse(created))) continue;
         entries.push({id: record.id, created, createdMs: Date.parse(created), path: record.path});
       }
@@ -83,7 +83,7 @@ export class JournalData {
     this.ensure();
     const local = this.drafts.list().find(draft => draft.targetCollectionId === this.connection.id && draft.recordId === entry.id);
     if (local) return local;
-    const record = await this.connection.records.get(entry.id, {body: true, document: true}, this.caller.signal);
+    const record = await this.connection.records.get(entry.id, {include: {body: true, document: true}, signal: this.caller.signal});
     this.ensure(); currentRecord(record, entry.id);
     const draft = await this.drafts.mutate(() => this.drafts.put({...this.drafts.blank(this.connection.id, new Date(entry.createdMs)), id: entry.id,
       created: entry.created, body: record.body!, savedBody: record.body!, path: record.path, recordId: record.id}));
@@ -123,19 +123,19 @@ export class JournalData {
           typeName: type.name, createdField: type.createdField, path, created: original.created,
           account: this.connection.scope.account, installation: this.connection.scope.installation}}));
         const attempt = draft.createAttempt!;
-        const result = await this.connection.records.save(this.connection.records.create({id: attempt.recordId, path: attempt.path, type: attempt.typeName,
+        const result = await this.connection.records.settle(this.connection.records.create({id: attempt.recordId, path: attempt.path, type: attempt.typeName,
           frontmatter: {[attempt.createdField]: attempt.created}, body: attempt.body}, {mutationId: attempt.mutationId, signal: this.caller.signal}), {signal: this.caller.signal});
         this.ensure(draft);
         // A refusal is definite: nothing was created, so the next save starts a new intent.
         if (result.outcome === "rejected") {
           await this.drafts.mutate(() => this.drafts.patch(id, {createAttempt: null}));
-          throw new Error(result.problem?.message ?? "mdbase refused this note. Your text is still on this device.");
+          throw new Error(result.problem.message);
         }
       }
       // Confirmed or kept on this device: the SDK write ledger settles it. Read the
       // ORIGINAL record by its pinned ID; creation is never resubmitted.
       const attempt = draft.createAttempt!;
-      const record = await this.connection.records.get(attempt.recordId, {body: true, document: true, effective: true}, this.caller.signal)
+      const record = await this.connection.records.get(attempt.recordId, {include: {body: true, document: true, effective: true}, signal: this.caller.signal})
         .catch(() => {throw new Error("Keep this page open while its original save is unresolved.");});
       this.ensure(draft); currentRecord(record, attempt.recordId);
       if (record.body !== attempt.body) throw new Error("The original saved note has changed. Your local text has been preserved.");
@@ -215,7 +215,7 @@ export class JournalData {
     const original = this.drafts.get(id);
     if (!original?.recordId) throw new Error("The original saved note is not available yet. Keep your text here.");
     this.ensure(original, true);
-    const record = await this.connection.records.get(original.recordId, {body: true, document: true}, this.caller.signal);
+    const record = await this.connection.records.get(original.recordId, {include: {body: true, document: true}, signal: this.caller.signal});
     this.ensure(original, true); currentRecord(record, original.recordId);
     const owned = this.leases.get(id);
     // A released conflict can still be retained by this SDK client. Reopen it

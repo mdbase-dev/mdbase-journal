@@ -75,8 +75,7 @@ test("day arrows load saved pages using their original record identity without a
   const h = await applicationFixture(), drafts = new JournalDrafts(memoryStorage());
   const previous = new Date(); previous.setDate(previous.getDate() - 1); previous.setHours(12, 0, 0, 0);
   const id = "018e0000-0000-7000-8000-000000000001";
-  await h.records.save(h.records.create({id, type: "collection-owned-entry", path: "journal/yesterday.md", frontmatter: {created: previous.toISOString()}, body: "Earlier saved page"}));
-  const describe = mock.method(h.records, "describe", async () => catalog());
+  await h.records.settle(h.records.create({id, type: "collection-owned-entry", path: "journal/yesterday.md", frontmatter: {created: previous.toISOString()}, body: "Earlier saved page"}));
   const window = new JSDOM(html, {url: "https://journal.fixture/"}).window;
   const view = mountJournal(window.document, drafts, h.mdbase), create = mock.method(h.records, "create");
   try {
@@ -85,13 +84,12 @@ test("day arrows load saved pages using their original record identity without a
     assert.equal(view.currentDraft().recordId, id); assert.equal(view.currentDraft().body, "Earlier saved page");
     assert.equal(view.currentDraft().createAttempt, null); assert.equal(create.mock.callCount(), 0);
     assert.equal((window.document.getElementById("entries") as HTMLDialogElement).open, false);
-  } finally {create.mock.restore(); describe.mock.restore(); view.dispose(); window.close(); h.close();}
+  } finally {create.mock.restore(); view.dispose(); window.close(); h.close();}
 });
 
 test("a late day lookup cannot replace a new page made while it was loading", async () => {
   const h = await applicationFixture(), window = new JSDOM(html, {url: "https://journal.fixture/"}).window;
   const drafts = new JournalDrafts(memoryStorage()), job = deferred<JournalEntry[]>();
-  const describe = mock.method(h.records, "describe", async () => catalog());
   const lookup = mock.method(JournalData.prototype, "entries", () => job.promise);
   const view = mountJournal(window.document, drafts, h.mdbase);
   try {
@@ -106,12 +104,11 @@ test("a late day lookup cannot replace a new page made while it was loading", as
     assert.equal(view.currentDraft().id, replacement); assert.equal(page.value, "");
     assert.equal(drafts.get(original)?.body, "Keep original text during lookup");
     assert.equal((window.document.getElementById("previous-day") as HTMLButtonElement).disabled, false);
-  } finally {job.resolve([]); lookup.mock.restore(); describe.mock.restore(); view.dispose(); window.close(); h.close();}
+  } finally {job.resolve([]); lookup.mock.restore(); view.dispose(); window.close(); h.close();}
 });
 
 test("a refused day lookup keeps the original page and re-enables navigation", async () => {
   const h = await applicationFixture(), window = new JSDOM(html, {url: "https://journal.fixture/"}).window;
-  const describe = mock.method(h.records, "describe", async () => catalog());
   const lookup = mock.method(JournalData.prototype, "entries", async () => {throw new Error("offline");});
   const view = mountJournal(window.document, new JournalDrafts(memoryStorage()), h.mdbase);
   try {
@@ -122,12 +119,12 @@ test("a refused day lookup keeps the original page and re-enables navigation", a
     assert.match(window.document.getElementById("status")!.textContent!, /current page is unchanged/);
     assert.equal((window.document.getElementById("entries") as HTMLDialogElement).open, false);
     assert.equal((window.document.getElementById("next-day") as HTMLButtonElement).disabled, false);
-  } finally {lookup.mock.restore(); describe.mock.restore(); view.dispose(); window.close(); h.close();}
+  } finally {lookup.mock.restore(); view.dispose(); window.close(); h.close();}
 });
 
 test("browsing before the catalog is ready loads saved entries as soon as it arrives", async () => {
   const h = await applicationFixture(), job = deferred<ReturnType<typeof catalog>>();
-  await h.records.save(h.records.create({type: "collection-owned-entry", path: "journal/earlier.md", frontmatter: {created: "2025-01-02T09:00:00+00:00"}, body: "Earlier saved entry"}));
+  await h.records.settle(h.records.create({type: "collection-owned-entry", path: "journal/earlier.md", frontmatter: {created: "2025-01-02T09:00:00+00:00"}, body: "Earlier saved entry"}));
   const describe = mock.method(h.records, "describe", () => job.promise);
   const window = new JSDOM(html, {url: "https://journal.fixture/"}).window, document = window.document;
   const dialog = document.querySelector<HTMLDialogElement>("#entries")!;
@@ -147,7 +144,7 @@ test("saved entries use the bound type and original record, without another crea
   const h = await applicationFixture(), drafts = new JournalDrafts(memoryStorage()), data = new JournalData(h.connection, drafts);
   const type = journalEntryTypes(catalog("written", "my-entry"))[0]!;
   try {
-    const saved = await h.records.save(h.records.create({type: type.name, path: "journal/old.md", frontmatter: {written: "2025-01-02T09:00:00+00:00"}, body: "Earlier saved entry"}));
+    const saved = await h.records.settle(h.records.create({type: type.name, path: "journal/old.md", frontmatter: {written: "2025-01-02T09:00:00+00:00"}, body: "Earlier saved entry"}));
     assert.equal(saved.outcome, "confirmed");
     const entries = await data.entries([type]); assert.equal(entries.length, 1);
     const spy = mock.method(h.records, "create");
@@ -157,7 +154,7 @@ test("saved entries use the bound type and original record, without another crea
       assert.equal(draft.body, "Earlier saved entry");
       await data.open(draft.id);
       data.setBody(draft.id, "Earlier saved entry edited"); await data.flush(draft.id);
-      assert.equal((await h.records.get(draft.recordId!, {body: true})).body, "Earlier saved entry edited");
+      assert.equal((await h.records.get(draft.recordId!, {include: {body: true}})).body, "Earlier saved entry edited");
       assert.equal(spy.mock.callCount(), 0);
       assert.equal((await data.resume(entries[0]!)).id, draft.id);
     } finally {spy.mock.restore();}
@@ -169,7 +166,7 @@ test("existing entries save without choosing a type in a collection with several
   const describe = mock.method(f.records, "describe", async () => ({...first, types: [...first.types, ...other.types],
     contracts: [{...first.contracts[0]!, implementedBy: [first.types[0]!.name, other.types[0]!.name]}]}));
   const date = new Date(); date.setDate(date.getDate() - 1);
-  const created = await f.records.save(f.records.create({type: first.types[0]!.name, path: "journal/existing.md", frontmatter: {created: date.toISOString()}, body: "Existing page"}));
+  const created = await f.records.settle(f.records.create({type: first.types[0]!.name, path: "journal/existing.md", frontmatter: {created: date.toISOString()}, body: "Existing page"}));
   assert.equal(created.outcome, "confirmed");
   const window = new JSDOM(html, {url: "https://journal.fixture/"}).window;
   const {memoryLocks} = await import("./support.js");
@@ -189,6 +186,6 @@ test("existing entries save without choosing a type in a collection with several
     assert.equal((await lease.session.flush()).ok, true);
     await until(() => window.document.getElementById("status")!.textContent === "Saved");
     assert.equal(create.mock.callCount(), 0);
-    assert.equal((await f.records.get(view.currentDraft().recordId!, {body: true})).body, page.value);
+    assert.equal((await f.records.get(view.currentDraft().recordId!, {include: {body: true}})).body, page.value);
   } finally {lease?.release(); create.mock.restore(); view.dispose(); describe.mock.restore(); window.close(); await f.fixture.close();}
 });

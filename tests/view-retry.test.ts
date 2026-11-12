@@ -4,7 +4,7 @@ import {readFileSync} from "node:fs";
 import {JSDOM} from "jsdom";
 import {JournalDrafts} from "../src/drafts.js";
 import {mountJournal} from "../src/view.js";
-import {applicationFixture, catalog, memoryStorage} from "./support.js";
+import {applicationFixture, memoryStorage} from "./support.js";
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 async function until(check: () => boolean): Promise<void> {
   for (let i = 0; i < 400; i++) {if (check()) return; await new Promise(resolve => setTimeout(resolve, 10));}
@@ -17,7 +17,6 @@ function dom() {
 }
 void test("Retry appears only for an unknown save outcome and settles the original write", {timeout: 15_000}, async () => {
   const f = await applicationFixture(), h = dom(), drafts = new JournalDrafts(memoryStorage());
-  const describe = mock.method(f.records, "describe", async () => catalog());
   const original = f.records.awaitReceipt.bind(f.records), update = mock.method(f.records, "update");
   const view = mountJournal(h.window.document, drafts, f.mdbase);
   const status = h.window.document.getElementById("status")!, retry = h.window.document.getElementById("retry-button") as HTMLButtonElement;
@@ -31,13 +30,12 @@ void test("Retry appears only for an unknown save outcome and settles the origin
     assert.equal(retry.disabled, true);
     await until(() => status.textContent === "Saved" && retry.hidden);
     assert.equal(update.mock.callCount(), 1, "Retry settles the original write without resubmitting it");
-    assert.equal((await f.records.get(drafts.get(view.currentDraft().id)!.recordId!, {body: true})).body, "First, revised");
+    assert.equal((await f.records.get(drafts.get(view.currentDraft().id)!.recordId!, {include: {body: true}})).body, "First, revised");
     receipt.mock.restore();
-  } finally {view.dispose(); describe.mock.restore(); update.mock.restore(); h.window.close(); f.close();}
+  } finally {view.dispose(); update.mock.restore(); h.window.close(); f.close();}
 });
 void test("a write kept on this device while offline does not offer Retry", {timeout: 15_000}, async () => {
   const f = await applicationFixture({confirmed: false}), h = dom(), drafts = new JournalDrafts(memoryStorage());
-  const describe = mock.method(f.records, "describe", async () => catalog());
   const view = mountJournal(h.window.document, drafts, f.mdbase);
   const status = h.window.document.getElementById("status")!, retry = h.window.document.getElementById("retry-button") as HTMLButtonElement;
   try {
@@ -48,5 +46,5 @@ void test("a write kept on this device while offline does not offer Retry", {tim
     assert.equal(status.textContent, "Saved on this device; waiting for sync");
     f.replica.setOnline(true); f.replica.confirmAll();
     await until(() => status.textContent === "Saved"); assert.equal(retry.hidden, true);
-  } finally {view.dispose(); describe.mock.restore(); h.window.close(); f.close();}
+  } finally {view.dispose(); h.window.close(); f.close();}
 });

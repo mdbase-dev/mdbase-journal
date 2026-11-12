@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import {mock, test} from "node:test";
+import {test} from "node:test";
 import {readFileSync} from "node:fs";
 import {JSDOM} from "jsdom";
 import {DraftConflictError, DraftPersistenceError, JournalDrafts, type DraftLock} from "../src/drafts.js";
 import {mountJournal} from "../src/view.js";
-import {applicationFixture, catalog, deferred, memoryStorage} from "./support.js";
+import {applicationFixture, deferred, memoryStorage} from "./support.js";
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 function serialLock(): DraftLock {
@@ -78,7 +78,6 @@ test("a single-tab save echo arriving ahead of queued input is not an outside ed
   let tail = Promise.resolve(), pause: Promise<void> | null = null;
   const lock: DraftLock = operation => {const barrier = pause, next = tail.then(async () => {if (barrier) await barrier; return operation();}); tail = next.then(() => {}, () => {}); return next;};
   const drafts = new JournalDrafts(memoryStorage(), undefined, lock);
-  const describe = mock.method(f.records, "describe", async () => catalog());
   const view = await drafts.mutate(() => mountJournal(h.window.document, drafts, f.mdbase));
   let lease: Awaited<ReturnType<typeof f.records.records.open>> | null = null;
   const until = async (ready: () => boolean) => {for (let i = 0; i < 100 && !ready(); i++) await new Promise(resolve => setTimeout(resolve, 5)); assert(ready());};
@@ -101,8 +100,8 @@ test("a single-tab save echo arriving ahead of queued input is not an outside ed
     await until(() => view.currentDraft().id === id);
     assert.equal(h.page.value, "Seed and my edit plus more");
     assert.equal(h.window.document.getElementById("draft-conflict")!.hidden, true);
-    assert.equal((await f.records.get(recordId, {body: true})).body, h.page.value);
-  } finally {pause = null; gate.resolve(); await tail; lease?.release(); view.dispose(); describe.mock.restore(); h.window.close(); f.close();}
+    assert.equal((await f.records.get(recordId, {include: {body: true}})).body, h.page.value);
+  } finally {pause = null; gate.resolve(); await tail; lease?.release(); view.dispose(); h.window.close(); f.close();}
 });
 test("rapid queued input retains every character without a false self-conflict", async () => {
   const drafts = new JournalDrafts(memoryStorage(), undefined, serialLock()), h = host();
