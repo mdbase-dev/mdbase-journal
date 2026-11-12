@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {mock, test} from "node:test";
 import {JSDOM} from "jsdom";
-import {describeError, summarizeStatus} from "@mdbase-dev/sdk";
+import {describeError} from "@mdbase-dev/sdk";
 import {JournalDrafts} from "../src/drafts.js";
 import {journalConnection} from "../src/application.js";
 import {mountJournal} from "../src/view.js";
@@ -59,7 +59,7 @@ for (const problem of ["collection_migrating", "update_required", "account_suspe
     f.fixture.controls.publishSnapshot({...f.ready, problem});
     assert.equal(journalConnection(f.mdbase), originalLease, "server refusal preserves the exact original public lease");
     const status = window.document.getElementById("status")!.textContent!;
-    assert.equal(status, summarizeStatus(f.records.status, problem).text); assert(!status.includes(problem));
+    assert.equal(status, describeError(problem)!.title); assert(!status.includes(problem));
     const page = window.document.getElementById("page") as HTMLTextAreaElement;
     page.value = "uipolish: retained during upgrade"; page.dispatchEvent(new window.Event("input"));
     const original = view.currentDraft(); view.newPage(); view.undoNewPage();

@@ -26,11 +26,11 @@ test("real SDK create pins original IDs, then edits through the same record leas
     const saved = drafts.get(draft.id)!;
     assert.equal(saved.recordId, saved.createAttempt?.recordId); assert.equal(saved.savedBody, "First page");
     assert.equal(saved.createAttempt?.path, "journal/entry.md");
-    const record = await h.records.get(saved.recordId!, {body: true});
-    assert.equal(record.frontmatter.get("written"), draft.created); assert.equal(record.body, "First page");
+    const record = await h.records.get(saved.recordId!, {include: {body: true}});
+    assert.equal(record.frontmatter["written"], draft.created); assert.equal(record.body, "First page");
     assert.equal(await data.open(draft.id, journalEntryTypes(catalog())[0]!), lease);
     data.setBody(draft.id, "Revised page"); await data.flush(draft.id);
-    assert.equal((await h.records.get(saved.recordId!, {body: true})).body, "Revised page");
+    assert.equal((await h.records.get(saved.recordId!, {include: {body: true}})).body, "Revised page");
     assert.equal(drafts.get(draft.id)?.savedBody, "Revised page");
   } finally {data.release(); assert.equal(h.records.link, "open"); h.close();}
 });
@@ -87,7 +87,7 @@ test("quota failure inside a real session notification is contained and blocks f
     assert.match(data.problem(draft.id)!, /original save outcome/);
     assert.equal(drafts.get(draft.id)?.savedBody, "Original"); assert.equal(drafts.get(draft.id)?.body, "Revised");
     await assert.rejects(data.flush(draft.id), /original save outcome/);
-    assert.equal((await h.records.get(drafts.get(draft.id)!.recordId!, {body: true})).body, "Revised");
+    assert.equal((await h.records.get(drafts.get(draft.id)!.recordId!, {include: {body: true}})).body, "Revised");
   } finally {data.release(); h.close();}
 });
 test("protected original readback refuses Saved and recovery retains the original mutation and path", async () => {
@@ -136,7 +136,7 @@ test("stale displayed native text cannot use a fresh SDK revision, including aft
       const reloaded = new JournalData(h.connection, drafts);
       try {await assert.rejects(reloaded.open(draft.id), /changed elsewhere/);} finally {reloaded.release();}
       assert.equal(update.mock.callCount(), 0);
-      assert.equal((await h.records.get(drafts.get(draft.id)!.recordId!, {body: true})).body, "Seed\nOther tab");
+      assert.equal((await h.records.get(drafts.get(draft.id)!.recordId!, {include: {body: true}})).body, "Seed\nOther tab");
       const selected = await data.useSavedVersion(draft.id);
       assert.equal(selected.body, "Seed\nOther tab"); assert.equal(selected.reviewRequired, false);
       assert.equal(update.mock.callCount(), 0, "using the saved version is read-only");
@@ -180,14 +180,14 @@ test("an own save witness cannot excuse a later same-body outside metadata edit"
     const lease = await data.open(draft.id, journalEntryTypes(catalog())[0]!);
     await data.setBody(draft.id, "My edit"); const shown = lease.session.getSnapshot();
     await data.flush(draft.id); const own = lease.session.getSnapshot();
-    const write = await h.records.save(h.records.update(own.record, {patch: {outside: "Other editor"}}));
+    const write = await h.records.settle(h.records.update(own.record, {patch: {outside: "Other editor"}}));
     assert.equal(write.outcome, "confirmed");
     for (let i = 0; i < 100 && lease.session.getSnapshot().record.revision === own.record.revision; i++) await new Promise(resolve => setTimeout(resolve, 5));
     assert.notEqual(lease.session.getSnapshot().record.revision, own.record.revision);
     assert.equal(lease.session.getSnapshot().body, shown.body);
     await assert.rejects(data.setBody(draft.id, "My edit with stale typing", {body: shown.body, revision: shown.record.revision}), /changed elsewhere/);
     assert.equal(drafts.get(draft.id)?.reviewRequired, true);
-    assert.equal((await h.records.get(own.record.id, {body: true})).body, "My edit");
+    assert.equal((await h.records.get(own.record.id, {include: {body: true}})).body, "My edit");
   } finally {data.release(); h.close();}
 });
 test("files use the same public FilesApi and real SDK protocol", async () => {

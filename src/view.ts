@@ -135,7 +135,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     if (!message && opening?.state === "unresolved") message = "The original save is unresolved. Your text stays on this device.";
     if (!message && record && ["conflict", "recovery", "deleted", "error"].includes(record.state)) message = "Your text is on this device. Resolve its original save before continuing.";
     if (!message && actionProblem) message = actionProblem.title;
-    if (!message && phase?.kind === "ready" && (phase.problem || state?.problem)) message = state?.sync?.text ?? phase.problem?.title ?? describeError(state)?.title;
+    if (!message && phase?.kind === "ready" && (phase.problem || state?.problem)) message = phase.problem?.title ?? describeError(state)?.title;
     // Never "Saving…" or "Saved" while offline, reconnecting or holding changes on this device.
     const notice = connectionNotice(state, document.defaultView?.navigator.onLine ?? true);
     if (!message && notice) message = connectionNoticeLabels[notice];

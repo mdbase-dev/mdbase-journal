@@ -29,7 +29,7 @@ for (const offline of [false, true]) test(`a delayed storage echo cannot replace
       f.replica.setOnline(true); f.replica.confirmAll();
     }
     await data.flush(draft.id);
-    assert.equal((await f.records.get(drafts.get(draft.id)!.recordId!, {body: true})).body, "Seed\n[test] has all its text");
+    assert.equal((await f.records.get(drafts.get(draft.id)!.recordId!, {include: {body: true}})).body, "Seed\n[test] has all its text");
   } finally {data.release(); f.close();}
 });
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
@@ -62,6 +62,6 @@ test("fast offline input through the origin lock keeps its complete text after r
     assert.equal(window.document.getElementById("draft-conflict")!.hidden, true);
     f.replica.setOnline(true); f.replica.confirmAll();
     await until(() => status.textContent === "Saved");
-    assert.equal((await f.records.get(drafts.get(view.currentDraft().id)!.recordId!, {body: true})).body, expected);
+    assert.equal((await f.records.get(drafts.get(view.currentDraft().id)!.recordId!, {include: {body: true}})).body, expected);
   } finally {view.dispose(); describe.mock.restore(); window.close(); f.close();}
 });

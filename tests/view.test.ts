@@ -250,7 +250,7 @@ test("a durable peer-tab edit feeds the same ready native lease without losing e
     ha.window.dispatchEvent(new ha.window.StorageEvent("storage", {key: `journal.native.note.${va.currentDraft().id}`}));
     await until(() => a.get(va.currentDraft().id)?.savedBody === "Seed\\nA\\nB" || undefined, 500);
     const draft = a.get(va.currentDraft().id)!;
-    assert.equal((await f.records.get(draft.recordId!, {body: true})).body, "Seed\\nA\\nB");
+    assert.equal((await f.records.get(draft.recordId!, {include: {body: true}})).body, "Seed\\nA\\nB");
     assert.equal(ha.page.value, "Seed\\nA\\nB");
     assert.equal(draft.reviewRequired, undefined);
   } finally {va.dispose(); vb?.dispose(); describe.mock.restore(); ha.window.close(); hb.window.close(); f.close();}
@@ -264,14 +264,14 @@ test("reload reacquires the original confirmed entry and shows Saved without ano
     h.write("Confirmed original note");
     await until(() => h.window.document.getElementById("status")!.textContent === "Saved" || undefined);
     const original = first.currentDraft(); first.dispose();
-    const create = mock.method(f.records, "create"), save = mock.method(f.records, "save");
+    const create = mock.method(f.records, "create"), save = mock.method(f.records, "settle");
     try {
       reloaded = mountJournal(h.window.document, new JournalDrafts(storage), f.mdbase);
       await until(() => h.window.document.getElementById("status")!.textContent === "Saved" || undefined);
       assert.equal(reloaded.currentDraft().id, original.id); assert.equal(h.page.value, original.body);
       assert.equal(reloaded.currentDraft().recordId, original.recordId);
       assert.equal(create.mock.callCount(), 0); assert.equal(save.mock.callCount(), 0);
-      assert.equal((await f.records.get(original.recordId!, {body: true})).body, original.body);
+      assert.equal((await f.records.get(original.recordId!, {include: {body: true}})).body, original.body);
     } finally {create.mock.restore(); save.mock.restore();}
   } finally {first.dispose(); reloaded?.dispose(); describe.mock.restore(); h.window.close(); f.close();}
 });

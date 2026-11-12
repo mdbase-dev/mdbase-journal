@@ -31,7 +31,7 @@ void test("Retry appears only for an unknown save outcome and settles the origin
     assert.equal(retry.disabled, true);
     await until(() => status.textContent === "Saved" && retry.hidden);
     assert.equal(update.mock.callCount(), 1, "Retry settles the original write without resubmitting it");
-    assert.equal((await f.records.get(drafts.get(view.currentDraft().id)!.recordId!, {body: true})).body, "First, revised");
+    assert.equal((await f.records.get(drafts.get(view.currentDraft().id)!.recordId!, {include: {body: true}})).body, "First, revised");
     receipt.mock.restore();
   } finally {view.dispose(); describe.mock.restore(); update.mock.restore(); h.window.close(); f.close();}
 });

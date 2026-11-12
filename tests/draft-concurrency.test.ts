@@ -101,7 +101,7 @@ test("a single-tab save echo arriving ahead of queued input is not an outside ed
     await until(() => view.currentDraft().id === id);
     assert.equal(h.page.value, "Seed and my edit plus more");
     assert.equal(h.window.document.getElementById("draft-conflict")!.hidden, true);
-    assert.equal((await f.records.get(recordId, {body: true})).body, h.page.value);
+    assert.equal((await f.records.get(recordId, {include: {body: true}})).body, h.page.value);
   } finally {pause = null; gate.resolve(); await tail; lease?.release(); view.dispose(); describe.mock.restore(); h.window.close(); f.close();}
 });
 test("rapid queued input retains every character without a false self-conflict", async () => {
