@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {mock, test} from "node:test";
+import {test} from "node:test";
 import {readFileSync} from "node:fs";
 import {JSDOM} from "jsdom";
 import {JournalDrafts, type DraftLock} from "../src/drafts.js";
@@ -44,7 +44,6 @@ async function until(check: () => boolean): Promise<void> {
 test("fast offline input through the origin lock keeps its complete text after reconnect", {timeout: 20_000}, async () => {
   const f = await applicationFixture(), window = new JSDOM(html, {url: "https://journal.fixture/", runScripts: "outside-only"}).window;
   const drafts = new JournalDrafts(memoryStorage(), undefined, serialLock());
-  const describe = mock.method(f.records, "describe", async () => catalog());
   const view = await drafts.mutate(() => mountJournal(window.document, drafts, f.mdbase));
   const page = window.document.querySelector<HTMLTextAreaElement>("#page")!;
   const status = window.document.getElementById("status")!;
@@ -63,5 +62,5 @@ test("fast offline input through the origin lock keeps its complete text after r
     f.replica.setOnline(true); f.replica.confirmAll();
     await until(() => status.textContent === "Saved");
     assert.equal((await f.records.get(drafts.get(view.currentDraft().id)!.recordId!, {include: {body: true}})).body, expected);
-  } finally {view.dispose(); describe.mock.restore(); window.close(); f.close();}
+  } finally {view.dispose(); window.close(); f.close();}
 });

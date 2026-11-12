@@ -239,7 +239,6 @@ test("Sign out in settings goes through the SDK's signOut, never close, and keep
 test("a durable peer-tab edit feeds the same ready native lease without losing either addition", async () => {
   const f = await applicationFixture(), ha = dom(), hb = dom(), storage = memoryStorage();
   const a = new JournalDrafts(storage), b = new JournalDrafts(storage);
-  const describe = mock.method(f.records, "describe", async () => catalog());
   const va = mountJournal(ha.window.document, a, f.mdbase);
   let vb: ReturnType<typeof mountJournal> | null = null;
   try {
@@ -253,11 +252,10 @@ test("a durable peer-tab edit feeds the same ready native lease without losing e
     assert.equal((await f.records.get(draft.recordId!, {include: {body: true}})).body, "Seed\\nA\\nB");
     assert.equal(ha.page.value, "Seed\\nA\\nB");
     assert.equal(draft.reviewRequired, undefined);
-  } finally {va.dispose(); vb?.dispose(); describe.mock.restore(); ha.window.close(); hb.window.close(); f.close();}
+  } finally {va.dispose(); vb?.dispose(); ha.window.close(); hb.window.close(); f.close();}
 });
 test("reload reacquires the original confirmed entry and shows Saved without another write", async () => {
   const f = await applicationFixture(), h = dom(), storage = memoryStorage(), drafts = new JournalDrafts(storage);
-  const describe = mock.method(f.records, "describe", async () => catalog());
   const first = mountJournal(h.window.document, drafts, f.mdbase);
   let reloaded: ReturnType<typeof mountJournal> | null = null;
   try {
@@ -273,7 +271,7 @@ test("reload reacquires the original confirmed entry and shows Saved without ano
       assert.equal(create.mock.callCount(), 0); assert.equal(save.mock.callCount(), 0);
       assert.equal((await f.records.get(original.recordId!, {include: {body: true}})).body, original.body);
     } finally {create.mock.restore(); save.mock.restore();}
-  } finally {first.dispose(); reloaded?.dispose(); describe.mock.restore(); h.window.close(); f.close();}
+  } finally {first.dispose(); reloaded?.dispose(); h.window.close(); f.close();}
 });
 test("late catalog completion after disposal cannot start data writes or close a borrowed client", async () => {
   const f = await applicationFixture(), h = dom(), job = deferred<ReturnType<typeof catalog>>();

@@ -31,7 +31,8 @@ export function catalog(field = "created", name = "collection-owned-entry"): Des
 /** The SDK's test front door over one collection. `confirmed: false` keeps
  * writes pending (the log is unreachable) until `replica.confirmAll()`. */
 export async function applicationFixture({confirmed = true} = {}) {
-  const mdbase = await createTestMdbase({collections: [{name: "Writing", role: "owner"}]});
+  const mdbase = await createTestMdbase({collections: [{name: "Writing", role: "owner", contracts: [{id: JOURNAL_CONTRACT.id, version: JOURNAL_CONTRACT.version,
+    type: "collection-owned-entry", fields: {created: "created"}, contractDigest: JOURNAL_CONTRACT.digest}]}]});
   const {fixture} = mdbase, replica = fixture.replica(), records = fixture.client();
   if (!confirmed) replica.setOnline(false);
   const ready = fixture.mdbase.getSnapshot();

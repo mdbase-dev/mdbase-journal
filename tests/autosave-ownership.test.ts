@@ -111,7 +111,6 @@ test("closing the owner hands its latest unfinished draft to an idle tab", async
     assert.equal(createB.mock.callCount(), 0, "takeover retains the original create identity");
     assert.equal(b.page.value, "", "background recovery leaves the idle page alone");
     fresh = await f.replica.client();
-    mock.method(fresh, "describe", async () => catalog());
     reloaded = await t.tab(t.application(fresh));
     await until(() => reloaded!.window.document.getElementById("status")!.textContent === "Saved");
     const resumed = await fresh.records.open(recordId, {autosave: {idleMs: 1200}});
