@@ -2,7 +2,7 @@ import {describeError, type Mdbase, type MdbaseErrorDescription, type MdbaseSnap
 import {mountCollectionUi, type MountedCollectionUi} from "@mdbase-dev/ui/collections";
 import {journalConnection} from "./application.js";
 import {DraftConflictError, DraftPersistenceError, draftRevision, JournalDrafts, notePath, type JournalDraft} from "./drafts.js";
-import {JournalData, type JournalEntry, type JournalEntryType} from "./journal-data.js";
+import {DELETED_ENTRY_NOTICE, JournalData, type JournalEntry, type JournalEntryType} from "./journal-data.js";
 import {DraftOpens} from "./draft-opens.js";
 import {connectionNotice, connectionNoticeLabels} from "./connection-notice.js";
 export interface JournalView {dispose(): void; currentDraft(): JournalDraft; newPage(): void; undoNewPage(): void}
@@ -28,6 +28,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   let opens: DraftOpens | null = null;
   let unlistenData: (() => void) | null = null;
   let unlistenStatus: (() => void) | null = null;
+  let unlistenEntries: (() => void) | null = null;
+  let refreshEntries: (() => Promise<void>) | null = null;
   let actionProblem: MdbaseErrorDescription | null = null;
   let types: JournalEntryType[] = [];
   let type: JournalEntryType | null = null;
@@ -49,7 +51,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   let observedCollectionId = mdbase?.getSnapshot().selectedCollectionId ?? null;
   let current = drafts.blank(observedCollectionId);
   try {
-    const earlier = drafts.list().filter(draft => !draft.legacyKey && draft.body.trim() && (!observedCollectionId || draft.targetCollectionId === observedCollectionId))
+    const earlier = drafts.list().filter(draft => !draft.legacyKey && (draft.body.trim() || draft.deletedElsewhere && draft.body !== draft.savedBody) &&
+      (!draft.deletedElsewhere || draft.body !== draft.savedBody) && (!observedCollectionId || draft.targetCollectionId === observedCollectionId))
       .sort((a, b) => Number(a.finished) - Number(b.finished) || b.touchedMs - a.touchedMs)[0];
     if (earlier) current = drafts.patch(earlier.id, {finished: false});
     unpersistedDraft = !earlier;
@@ -106,8 +109,11 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       const latest = drafts.get(current.id);
       if (latest) {
         const changedBody = latest.body !== current.body;
-        current = latest;
-        if (changedBody) {
+        if (latest.deletedElsewhere && latest.body === latest.savedBody && page.value === latest.body) {
+          current = drafts.blank(snapshot()?.selectedCollectionId ?? null); unpersistedDraft = true;
+          clearUndo(); renderPage();
+        } else current = latest;
+        if (changedBody && current.id === latest.id) {
           const start = page.selectionStart, end = page.selectionEnd, atEnd = start === end && end === page.value.length;
           renderPage();
           page.setSelectionRange(atEnd ? page.value.length : Math.min(start, page.value.length), atEnd ? page.value.length : Math.min(end, page.value.length));
@@ -117,8 +123,11 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     const observed = data?.snapshot(current.id);
     if (observed && observed.body === page.value) displayedRecordRevision = observed.record.revision;
     conflicted = conflicted || current.reviewRequired === true || observed?.state === "conflict";
-    element("draft-conflict").hidden = !conflicted;
-    element<HTMLButtonElement>("use-saved-version").disabled = current.reviewRequired === true && !data;
+    element("draft-conflict").hidden = !conflicted && !current.deletedElsewhere;
+    element("draft-conflict").setAttribute("aria-label", current.deletedElsewhere ? "Deleted entry" : "Conflicting note");
+    element("draft-conflict").querySelector("p")!.textContent = current.deletedElsewhere ? `${DELETED_ENTRY_NOTICE} Copy it to keep writing in a new page.` : "This note changed elsewhere. Copy your text before using the saved version.";
+    element("use-saved-version").hidden = !!current.deletedElsewhere;
+    element<HTMLButtonElement>("use-saved-version").disabled = !!current.deletedElsewhere || current.reviewRequired === true && !data;
     if (entriesDialog.open) renderEntries();
     document.body.classList.toggle("typing", !!current.body.trim());
     const state = snapshot();
@@ -130,6 +139,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     try {unresolved = drafts.list().filter(draft => !!draft.body.trim() && draft.body !== draft.savedBody);} catch {problem = "Keep this page open: Journal cannot read its drafts on this device.";}
     let message = problem ?? data?.problem(current.id);
     const opening = opens?.state(current.id);
+    if (!message && current.deletedElsewhere) message = DELETED_ENTRY_NOTICE;
     if (!message && current.legacyKey) message = "Earlier note: review its original save. Your text stays on this device.";
     if (!message && current.reviewRequired) message = "Your text is on this device. Resolve its original save before continuing.";
     if (!message && opening?.state === "unresolved") message = "The original save is unresolved. Your text stays on this device.";
@@ -167,7 +177,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     details.replaceChildren(...unresolved.map(draft => {
       const row = document.createElement("div"); row.className = "pending-entry";
       const text = document.createElement("small"), saving = opens?.state(draft.id), record = data?.snapshot(draft.id);
-      const state = draft.legacyKey ? "Earlier note: original save needs review" :
+      const state = draft.deletedElsewhere ? "Deleted elsewhere. Your text stays on this device" : draft.legacyKey ? "Earlier note: original save needs review" :
         draft.targetCollectionId && draft.targetCollectionId !== openId ? "Waiting for its collection" :
         draft.reviewRequired || data?.problem(draft.id) ? "Original save needs attention" : saving?.state === "unresolved" ? "Original save unresolved" :
         saving?.state === "opening" || record?.state === "saving" ? "Saving…" :
@@ -234,7 +244,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   });}
   function visibleEntries(): {entry: JournalEntry; draft: JournalDraft | null}[] {
     const collection = snapshot()?.selectedCollectionId ?? current.targetCollectionId;
-    const local = drafts.list().filter(draft => draft.targetCollectionId === collection && draft.body.trim());
+    const local = drafts.list().filter(draft => draft.targetCollectionId === collection &&
+      (draft.deletedElsewhere ? draft.body !== draft.savedBody : draft.body.trim()));
     const rows = entries.filter(entry => !local.some(draft => draft.recordId === entry.id))
       .map(entry => ({entry, draft: null as JournalDraft | null}));
     rows.push(...local.map(draft => ({entry: {id: draft.id, created: draft.created, createdMs: draft.createdMs, path: draft.path ?? ""}, draft})));
@@ -250,6 +261,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       const date = document.createElement("span"), summary = document.createElement("small");
       date.textContent = new Date(entry.createdMs).toLocaleString(undefined, {weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit"});
       summary.textContent = draft?.body.trim().split("\n")[0]?.slice(0, 100) ?? entry.path.split("/").pop() ?? "Journal entry";
+      if (draft?.deletedElsewhere) summary.textContent = `Deleted elsewhere · ${summary.textContent || "Your text stays on this device"}`;
       button.append(date, summary); button.disabled = memoryOnly;
       button.onclick = () => {
         if (draft) {restoreDraft(draft.id); if (current.id === draft.id) entriesDialog.close(); return;}
@@ -273,9 +285,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     // The ready connection can arrive before its catalog. Its completion below
     // refreshes this sheet; never mistake that interval for an empty journal.
     if (!types.length) return;
-    void owned.entries(types).then(value => {if (!disposed && data === owned) entries = value;}, () => {
-      if (!disposed && data === owned) entriesProblem = "Saved entries could not be loaded. Notes on this device are still available.";
-    }).finally(() => {if (!disposed && data === owned) {entriesLoading = false; renderEntries();}});
+    void refreshEntries?.();
   }
   function startOnDate(date: Date): void {transaction(() => {
     if (memoryOnly || !Number.isFinite(date.getTime())) return;
@@ -344,18 +354,44 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     observedCollectionId = selectedId;
     const next = journalConnection(mdbase);
     if (next !== data?.connection) {
-      unlistenData?.(); unlistenData = null; unlistenStatus?.(); unlistenStatus = null; opens?.dispose(); opens = null; data?.release(); data = null; types = []; type = null; actionProblem = null;
+      unlistenData?.(); unlistenData = null; unlistenStatus?.(); unlistenStatus = null; unlistenEntries?.(); unlistenEntries = null; refreshEntries = null;
+      opens?.dispose(); opens = null; data?.release(); data = null; types = []; type = null; actionProblem = null;
       entries = []; entriesLoading = false;
       if (next) {
         const owned = new JournalData(next, drafts); data = owned;
+        let refreshing: Promise<void> | null = null, refreshAgain = false;
+        const refresh = (): Promise<void> => {
+          if (disposed || data !== owned || !types.length) return Promise.resolve();
+          if (refreshing) {refreshAgain = true; return refreshing;}
+          refreshing = (async () => {
+            do {
+              refreshAgain = false;
+              try {
+                const value = await owned.entries(types);
+                if (disposed || data !== owned) return;
+                entries = value; entriesProblem = null;
+              } catch {
+                if (disposed || data !== owned) return;
+                entriesProblem = "Saved entries could not be loaded. Notes on this device are still available.";
+              }
+              entriesLoading = false; render();
+            } while (refreshAgain && !disposed && data === owned);
+          })().finally(() => {refreshing = null; if (refreshAgain) void refresh();});
+          return refreshing;
+        };
+        refreshEntries = refresh;
         opens = new DraftOpens(owned, drafts, () => !disposed && data === owned && owned.connection.isCurrent(), render, document.defaultView?.navigator.locks);
         unlistenData = owned.subscribe(render);
         // A status push (back online, pending writes settled) is when a failed open can succeed.
-        unlistenStatus = next.records.onStatus(save);
+        unlistenStatus = next.records.onStatus(() => {save(); void refresh();});
+        const watch = next.records.watchChanges(() => {void refresh();});
+        unlistenEntries = watch;
+        void watch.ready.catch(() => {/* Next status change or browsing retries the read. */});
         void owned.types().then(value => {
           if (disposed || data !== owned) return;
           types = value; type = value.find(item => item.name === preferences.entryTypes?.[owned.connection.id]) ?? (value.length === 1 ? value[0]! : null);
           render(); void save();
+          void refresh();
           if (entriesDialog.open) browse(entryDate.value);
         }, error => {if (!disposed && data === owned) {
           actionProblem = describeError(error) ?? describeError("internal");
@@ -441,8 +477,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   if (document.defaultView) for (const name of ["online", "offline"]) listen(document.defaultView, name, render);
   listen(element("copy-conflicting-text"), "click", () => {
     const clipboard = document.defaultView?.navigator.clipboard;
-    if (!clipboard) {page.focus(); page.select(); problem = "Your text is selected. Copy it before using the saved version."; render(); return;}
-    void clipboard.writeText(page.value).then(() => {problem = "Text copied. You can now use the saved version."; render();}, () => {page.focus(); page.select(); problem = "Copy your selected text before using the saved version."; render();});
+    if (!clipboard) {page.focus(); page.select(); problem = current.deletedElsewhere ? "Your text is selected. Copy it before starting a new page." : "Your text is selected. Copy it before using the saved version."; render(); return;}
+    void clipboard.writeText(page.value).then(() => {problem = current.deletedElsewhere ? "Text copied. Start a new page to keep writing." : "Text copied. You can now use the saved version."; render();}, () => {page.focus(); page.select(); problem = current.deletedElsewhere ? "Copy your selected text before starting a new page." : "Copy your selected text before using the saved version."; render();});
   });
   listen(element("use-saved-version"), "click", () => {
     const id = current.id, chosenEpoch = inputEpoch;
@@ -488,7 +524,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   renderPage(); changed(); render();
   return {currentDraft: () => current, newPage, undoNewPage, dispose() {
     if (disposed) return;
-    disposed = true; caller.abort(); clearUndo(); unlistenApp(); unlistenData?.(); unlistenStatus?.(); opens?.dispose(); data?.release();
+    disposed = true; caller.abort(); clearUndo(); unlistenApp(); unlistenData?.(); unlistenStatus?.(); unlistenEntries?.(); opens?.dispose(); data?.release();
     for (const part of mounted) part.unmount();
     // No SDK replacement, physical close or borrowed-client shutdown on disposal.
   }};

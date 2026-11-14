@@ -21,6 +21,8 @@ export interface JournalDraft {
   readonly revision?: string;
   /** Explicit review is required before replaying text from a stale native view. */
   reviewRequired?: boolean;
+  /** The original record was read as missing; local text is never discarded. */
+  deletedElsewhere?: boolean;
   path: string | null;
   targetCollectionId: string | null;
   recordId: string | null;
@@ -42,6 +44,7 @@ function validDraft(value: unknown): value is JournalDraft {
       !textOrNull(value.recordId) || !textOrNull(value.savedBody) || typeof value.finished !== "boolean" || !Number.isFinite(value.touchedMs)) return false;
   if (value.legacyKey !== undefined && (typeof value.legacyKey !== "string" || !value.legacyKey.startsWith("journal.note.") || value.legacyKey.length > 1024 || value.createAttempt !== null || value.recordId !== null)) return false;
   if (value.reviewRequired !== undefined && typeof value.reviewRequired !== "boolean") return false;
+  if (value.deletedElsewhere !== undefined && typeof value.deletedElsewhere !== "boolean") return false;
   const attempt = value.createAttempt;
   if (attempt !== null && (!object(attempt) || ["body", "typeName", "createdField", "path", "created", "account", "installation"].some(key => typeof attempt[key] !== "string") ||
       !uuid(attempt.mutationId) || !uuid(attempt.recordId) || attempt.created !== value.created || attempt.path !== value.path || !value.targetCollectionId)) return false;
