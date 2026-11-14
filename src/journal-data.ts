@@ -3,6 +3,7 @@ import {JournalDrafts, type JournalDraft} from "./drafts.js";
 export const JOURNAL_CONTRACT = Object.freeze({id: "journal.entry", version: "0.1.0", digest: "sha256:7e95bdf03621919fb0e722e5a29b48a68d7a4eaa3a94aea033d96ea2f7ec34cc"});
 export interface JournalEntryType {readonly name: string; readonly createdField: string}
 export interface JournalEntry {readonly id: string; readonly created: string; readonly createdMs: number; readonly path: string}
+export const DELETED_ENTRY_NOTICE = "This entry was deleted elsewhere. Your text stays on this device.";
 /** Only current canonical catalog bindings, never the starter type name. */
 export function journalEntryTypes(catalog: DescribeResult): JournalEntryType[] {
   const contract = catalog.contracts.filter(c => c.id === JOURNAL_CONTRACT.id && c.version === JOURNAL_CONTRACT.version && c.digest === JOURNAL_CONTRACT.digest);
@@ -51,6 +52,7 @@ export class JournalData {
   private notify(): void {for (const listener of this.listeners) listener();}
   private ensure(draft?: JournalDraft, reviewing = false): void {
     this.caller.signal.throwIfAborted();
+    if (draft?.deletedElsewhere) throw new Error(DELETED_ENTRY_NOTICE);
     if (draft?.reviewRequired && !reviewing) throw new Error("This note changed elsewhere. Copy your text or use the saved version before continuing.");
     if (draft?.legacyKey) throw new Error("This earlier note needs its original save reviewed. Your text is still on this device.");
     if (this.disposed || !this.connection.isCurrent()) throw new Error("This collection has changed. Your text is still on this device.");
@@ -69,6 +71,7 @@ export class JournalData {
     const entries: JournalEntry[] = [];
     for await (const page of this.connection.records.pages({types: types.map(type => type.name)}, {signal: this.caller.signal})) {
       this.ensure();
+      if (!page.complete) throw new Error("Saved entries are still loading. Notes on this device are still available.");
       for (const record of page.records) {
         const type = types.find(type => record.types.includes(type.name));
         const created = type ? record.frontmatter[type.createdField] : null;
@@ -76,7 +79,31 @@ export class JournalData {
         entries.push({id: record.id, created, createdMs: Date.parse(created), path: record.path});
       }
     }
+    // A query can omit a record because its type/date changed. Only an ordinary
+    // ID read returning not_found proves deletion; failed reads preserve copies.
+    const listed = new Set(entries.map(entry => entry.id));
+    for (const draft of this.drafts.list()) {
+      if (draft.targetCollectionId !== this.connection.id || !draft.recordId || draft.savedBody === null) continue;
+      if (listed.has(draft.recordId)) {
+        if (draft.deletedElsewhere) await this.markDeleted(draft.id, draft.recordId, false);
+        continue;
+      }
+      const record = await this.connection.records.find(draft.recordId, {signal: this.caller.signal});
+      this.ensure();
+      if (!record || draft.deletedElsewhere) await this.markDeleted(draft.id, draft.recordId, !record);
+    }
     return entries.sort((a, b) => b.createdMs - a.createdMs);
+  }
+  private async markDeleted(id: string, recordId: string, deletedElsewhere = true): Promise<void> {
+    await this.drafts.mutate(() => {
+      this.ensure();
+      const latest = this.drafts.get(id);
+      if (latest?.recordId === recordId && latest.targetCollectionId === this.connection.id && !!latest.deletedElsewhere !== deletedElsewhere) {
+        // Patch metadata under the origin lock: typing during the read survives.
+        this.drafts.patch(id, {deletedElsewhere});
+      }
+    });
+    this.notify();
   }
   /** Read an existing entry, never re-create it or mint a capture identity. */
   async resume(entry: JournalEntry): Promise<JournalDraft> {
@@ -146,10 +173,15 @@ export class JournalData {
     try {
       this.ensure(draft);
       const snapshot = lease.session.getSnapshot();
+      if (snapshot.state === "deleted") {await this.markDeleted(id, snapshot.record.id); throw new Error(DELETED_ENTRY_NOTICE);}
       if (snapshot.state === "saved" && snapshot.body !== draft.savedBody && draft.body !== snapshot.body) throw new Error("This note changed elsewhere. Your local text has been preserved.");
       const unsubscribe = lease.session.subscribe(() => {
         if (this.disposed || !this.connection.isCurrent() || this.problems.has(id)) return;
         const value = lease.session.getSnapshot(), capture = value.recovery;
+        if (value.state === "deleted") {
+          void this.markDeleted(id, value.record.id)
+            .catch(() => {this.problems.set(id, "Keep this page open: Journal cannot preserve the deletion notice on this device."); this.notify();});
+        }
         if (value.state === "conflict" && !this.drafts.get(id)?.reviewRequired) {
           void this.drafts.mutate(() => this.drafts.patch(id, {reviewRequired: true}))
             .catch(() => {this.problems.set(id, "Keep this page open: Journal cannot preserve its conflict on this device.");})

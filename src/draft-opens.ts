@@ -23,10 +23,10 @@ export class DraftOpens {
     for (const [id, release] of this.owners) {
       if (this.jobs.has(id) || this.releasing.has(id)) continue;
       const draft = this.drafts.get(id), record = this.data.snapshot(id);
-      if (id !== viewedId && draft?.body === draft?.savedBody && (!record || record.state === "saved" && !record.dirty) ||
+      if (draft?.deletedElsewhere || id !== viewedId && draft?.body === draft?.savedBody && (!record || record.state === "saved" && !record.dirty) ||
           draft?.reviewRequired && record?.state === "conflict") {
         const finish = () => {this.data.close(id); this.owners.delete(id); release();};
-        if (!record || record.state === "conflict") {finish(); continue;}
+        if (!record || record.state === "conflict" || draft?.deletedElsewhere) {finish(); continue;}
         // Saved is published before the SDK's original drive has returned.
         // Let that drive finish before releasing its lease and ownership.
         this.releasing.add(id);
@@ -50,7 +50,7 @@ export class DraftOpens {
   request(id: string, type?: JournalEntryType, viewed = false, edited = false): void {
     if (this.disposed || !this.isCurrent()) return;
     const draft = this.drafts.get(id);
-    if (!draft || draft.legacyKey || !draft.body.trim() || draft.body === draft.savedBody && (!viewed || !draft.recordId) ||
+    if (!draft || draft.deletedElsewhere || draft.legacyKey || !draft.body.trim() || draft.body === draft.savedBody && (!viewed || !draft.recordId) ||
         draft.targetCollectionId && draft.targetCollectionId !== this.data.connection.id || this.data.snapshot(id) || this.jobs.has(id)) return;
     this.types.set(id, type);
     if (!this.owns(id)) {
