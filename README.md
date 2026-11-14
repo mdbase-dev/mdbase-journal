@@ -8,7 +8,7 @@ The existing quiet writing surface, light/dark themes, folder preference and key
 
 Journal uses the public `MdbaseApplicationEntry` returned by `MdbaseConnect`. The SDK owns sign-in, popup presentation, URL selection, collection setup, readiness, the Worker and physical close. Journal subscribes to public snapshots and borrows the exact current `connection(id).records` and `connection(id).files`; it does not build another auth or storage engine.
 
-The dependency is the immutable **dev intake** at `3f417b6d`, not a release-qualified runtime. Its original tar and the active original browser-safe Connect protocol `c280cd194ffd` tar are file-pinned with source/SRI in `vendor/mdbase-sdk-dev-3f417b6d.json`. The old SDK and protocol archives remain unchanged. This packet has no vendor warnings or unused historical protocol member; the older development packet's warning remains only in its original retained metadata. Consumer bundling uses already-built public SDK modules, keeps the original Worker beside its application module and preserves the packaged module directory layout.
+The SDK archive is the production pin declared in `package.json` and `package-lock.json`. Local builds and protected publication resolve that archive's matching `sdk-production-*.json` metadata through the same production-pin check, including its byte count, SHA-256 and SHA-512. Builds compare every installed SDK dist member with the original archive and verify the direct protocol archive against the SDK's bundled original. Consumer bundling uses already-built public SDK modules, keeps the original Worker beside its application module and preserves the packaged module directory layout.
 
 Local writing does not depend on runtime admission. Journal surfaces SDK readiness and refusals without substituting a runtime. Its native registration and browser/runtime acceptance are separate requirements, not established by this source port or fixture tests.
 
@@ -23,14 +23,14 @@ npm run dev           # writing-only localhost app; no native registration
 `npm run build:local` intentionally builds only local writing. It does not enable a mock runtime. To build the native application, give the environment and the exact origin Journal will be served from:
 
 ```sh
-JOURNAL_ENVIRONMENT=lab \
-JOURNAL_ORIGIN='http://127.0.0.1:48224' \
+JOURNAL_ENVIRONMENT=production \
+JOURNAL_ORIGIN='https://journal.mdbase.dev' \
 npm run build
 ```
 
 The build writes `JOURNAL_ORIGIN` into the manifest as its homepage (and icon and redirect URI), because sign-in only registers Journal from the manifest's own origin. LAB builds may use a local `http://` origin (`localhost`, `127.0.0.1` or `[::1]`); production builds need `https://`. `JOURNAL_REGISTERED_APPLICATION_ID` is optional and defaults to the manifest's `id`, as in the other mdbase apps; sign-in self-registration supplies the registered ID. Missing environment or origin fails the native build. `npm run manifest` writes the committed manifest, using `JOURNAL_ORIGIN` when set and the pages.dev origin otherwise. A native build for another origin rewrites `public/.well-known/mdbase-app.json`; do not commit that copy.
 
-The current SDK41c dev packet contains its original runtime/SQLite WASM and canonical LAB trust (`native.available=true` describes packaged asset availability, not registration/readiness). LAB native consumer builds now succeed with explicit build inputs; without them they still refuse. Production trust remains unavailable. Journal never supplies substitute assets or trust. Registration and any LAB refresh/deployment remain separately owned.
+Native builds require the installed SDK's packaged release trust to match the requested environment. The committed production SDK cannot be retargeted to LAB or staging. The protected staging publisher authenticates the matching SDK prerelease archive and installs it ephemerally; `deploy:lab` uses the installed packet and refuses production trust, so a qualified LAB packet must be supplied before LAB deployment. Journal never substitutes assets or trust. Registration and runtime readiness remain separate from build verification.
 
 Tests use the SDK's `createTestMdbase` front door with actual SDK clients over `MemoryReplica` for records and files. Controlled readiness/catalog metadata is test-only, not native/runtime acceptance. Type checking retains `exactOptionalPropertyTypes=true` and `skipLibCheck=false`.
 

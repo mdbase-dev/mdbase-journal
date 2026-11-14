@@ -1,5 +1,7 @@
 # Unreleased
 
+- Local builds and development startup verify the SDK actually pinned by the app, using the same production metadata as publication.
+
 - Keep newer journal text when a delayed change from another tab arrives while you type.
 
 - Editing an entry in two tabs no longer silently overwrites another tab's text. Clean tabs follow saved changes; conflicting writing stays visible with copy and saved-version choices.

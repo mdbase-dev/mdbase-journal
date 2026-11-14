@@ -5,7 +5,7 @@ import {execFileSync} from "node:child_process";
 import {fileURLToPath,pathToFileURL} from "node:url";
 import {resolve} from "node:path";
 import {applicationInputs,assertStylesheetsShipped} from "../scripts/build-application.mjs";
-import {legacyLabFixture} from "./legacy-lab-fixture.mjs";
+import {pinnedSdkFixture} from "./pinned-sdk-fixture.mjs";
 import {buildJournalManifest} from "../scripts/build-manifest.mjs";
 const root=fileURLToPath(new URL("../",import.meta.url));
 test("native build requires environment and exact origin; the ID defaults to the manifest's",()=>{
@@ -29,7 +29,7 @@ test("manifest homepage follows the build origin and defaults to the pages.dev o
 });
 test("consumer build retains original same-artifact Worker/native bytes and no private/test entry",async()=>{
   const output=await mkdtemp(resolve(root,".application-build-"));
-  const fixture=await legacyLabFixture();
+  const fixture=await pinnedSdkFixture();
   const {buildApplication}=await import(pathToFileURL(resolve(fixture.root,"scripts/build-application.mjs")).href);
   try{
     const result=await buildApplication({writingOnly:true,env:{},output});
@@ -45,27 +45,33 @@ test("consumer build retains original same-artifact Worker/native bytes and no p
     assert.doesNotMatch(collections,/@import/);
     for(const name of ["brand","motion","screens","collections"])
       assert(collections.includes(`node_modules/@mdbase-dev/ui/css/${name}.css */`),name);
-    for(const member of ["application/worker.js","native/sqlite3.js","native/runtime-lab.wasm","native/sqlite3.wasm"]){
-      const archive=resolve(root,"vendor/mdbase-dev-sdk-0ecbef41.tgz");
+    for(const member of ["application/worker.js","native/sqlite3.js","native/runtime.wasm","native/sqlite3.wasm"]){
+      const archive=resolve(root,`vendor/${fixture.pin.artifact}`);
       const original=execFileSync("tar",["-xOf",archive,`package/dist/${member}`],{maxBuffer:16*1024*1024});
       assert.deepEqual(await readFile(resolve(output,"sdk",member)),original);
     }
     // Explicit fixture build inputs exercise packaging, not registration or a
     // native browser lifecycle. Missing explicit build inputs still refuses above.
-    const native=await buildApplication({output,env:{JOURNAL_REGISTERED_APPLICATION_ID:"build-fixture-only",JOURNAL_ENVIRONMENT:"lab",JOURNAL_ORIGIN:"https://journal.fixture"}});
+    const native=await buildApplication({output,env:{JOURNAL_REGISTERED_APPLICATION_ID:"build-fixture-only",JOURNAL_ENVIRONMENT:"production",JOURNAL_ORIGIN:"https://journal.mdbase.dev"}});
     assert.equal(native.writingOnly,false);
     assert.equal(native.inputs.registeredApplicationId,"build-fixture-only");
-    assert.equal(JSON.parse(await readFile(resolve(output,".well-known/mdbase-app.json"),"utf8")).homepage,"https://journal.fixture/");
-    const provenance=JSON.parse(await readFile(resolve(output,"sdk/native/provenance.lab.json"),"utf8"));
-    assert.equal(provenance.runtime.source.commit,"4fb345e4ebb99538a8e20a8218b410a14928021a");
-    assert.equal(provenance.runtime.sha256,"7d45ae07741b165b51b39d684c28014fcdf178ceeef05b233c78f7b9fa35137a");
-    assert.equal(provenance.verifier.clockOverride,false);
+    assert.equal(JSON.parse(await readFile(resolve(output,".well-known/mdbase-app.json"),"utf8")).homepage,"https://journal.mdbase.dev/");
+    const provenance=JSON.parse(await readFile(resolve(output,"sdk/native/provenance.json"),"utf8"));
+    assert.equal(provenance.runtime.source.commit,fixture.pin.runtime.source.commit);
+    assert.equal(provenance.runtime.sha256,fixture.pin.runtime.sha256);
     const html=await readFile(resolve(root,"public/index.html"),"utf8");
     // Root-absolute: the consent window returns to /auth/mdbase/callback.
     assert.match(html,/<script type="module" src="\/journal.js"><\/script>/);
     assert.doesNotMatch(html,/(?:href|src)="\.\//);
     assert.match(await readFile(resolve(output,"sdk/application/app-grant.js"),"utf8"),/deliverAppGrantCallback/);
     assert.doesNotMatch(html,/connect-popup|native-signin-ui|cdn.jsdelivr|callback-note/);
+    await assert.rejects(()=>buildApplication({output,env:{JOURNAL_ENVIRONMENT:"lab",JOURNAL_ORIGIN:"https://journal.fixture"}}),/carries "production" release trust, not lab trust/);
+    // The old drift failure must still reject changed installed bytes under the current pin.
+    await writeFile(resolve(fixture.root,"node_modules/@mdbase-dev/sdk/dist/app-host/app-environment.js"),"// installed tampering\n");
+    await assert.rejects(()=>buildApplication({writingOnly:true,env:{},output}),/Installed SDK drift: app-host\/app-environment\.js/);
+    const protocol=resolve(fixture.root,fixture.pin.bundledDependencies[0].member.slice("package/".length));
+    await writeFile(protocol,"changed protocol original");
+    await assert.rejects(()=>buildApplication({writingOnly:true,env:{},output}),{code:"ERR_ASSERTION"});
   }finally{await fixture.close();await rm(output,{recursive:true,force:true});}
 });
 test("the build refuses output that links or imports a stylesheet it does not contain",async()=>{
