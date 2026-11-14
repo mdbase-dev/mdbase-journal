@@ -10,6 +10,8 @@ Journal uses the public `MdbaseApplicationEntry` returned by `MdbaseConnect`. Th
 
 The SDK archive is the production pin declared in `package.json` and `package-lock.json`. Local builds and protected publication resolve that archive's matching `sdk-production-*.json` metadata through the same production-pin check, including its byte count, SHA-256 and SHA-512. Builds compare every installed SDK dist member with the original archive and verify the direct protocol archive against the SDK's bundled original. Consumer bundling uses already-built public SDK modules, keeps the original Worker beside its application module and preserves the packaged module directory layout.
 
+`vendor/` retains only the three current file dependencies and the SDK production metadata selected by the pin. Repins supply the replacement archive and metadata; builds and tests derive their inputs from that pin. Historical archives and receipts remain available in git history. Staging intake downloads and authenticates the matching prerelease, rather than reading historical vendored staging receipts.
+
 Local writing does not depend on runtime admission. Journal surfaces SDK readiness and refusals without substituting a runtime. Its native registration and browser/runtime acceptance are separate requirements, not established by this source port or fixture tests.
 
 ## Develop and verify
