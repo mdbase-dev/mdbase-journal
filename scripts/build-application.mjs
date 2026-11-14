@@ -6,6 +6,7 @@ import {readFile,readdir,writeFile,mkdir,access} from "node:fs/promises";
 import {fileURLToPath,pathToFileURL} from "node:url";
 import {dirname,resolve} from "node:path";
 import {build} from "esbuild";
+import {productionPin} from "./publisher/originals.mjs";
 import {JOURNAL_MANIFEST_ID,buildJournalManifest,writeJournalManifest} from "./build-manifest.mjs";
 const root=fileURLToPath(new URL("../",import.meta.url));
 const hash=(bytes,algorithm,encoding="hex")=>createHash(algorithm).update(bytes).digest(encoding);
@@ -20,8 +21,6 @@ export function applicationInputs(env){
 }
 /** Native asset filenames the packaged SDK itself loads, read from its own
  * packaged-assets declaration instead of an app-side filename assumption.
- * The pinned 0ecbef41 packet loads native/runtime-lab.wasm; the canonical
- * per-environment packets (mdbase-next PR #941) load native/runtime.wasm.
  * Deriving the names here means a repin needs no app-side rename, and the
  * app never substitutes or copies bytes under a name the SDK won't load. */
 export function nativeAssetNames(packagedAssetsSource){
@@ -52,16 +51,26 @@ export async function buildApplication({writingOnly=false,env=process.env,output
   // Native builds declare their own origin as the manifest homepage, as SDK registration requires.
   const manifest=inputs&&await buildJournalManifest({origin:inputs.origin,allowLocal:inputs.environment==="lab",environment:inputs.environment});
   // Protected publisher calls this only AFTER full frozen original/installed intake.
-  // Ordinary local/LAB builds retain the exact existing pin and behavior.
+  // Local builds use the same committed production pin as publisher intake.
   if(originals && (!inputs || inputs.environment!==originals.environment || !['staging','production'].includes(inputs.environment)))throw new Error("Native originals target mismatch");
   const pin=originals ? {artifact:originals.archives.sdk.path.slice('vendor/'.length),bytes:originals.archives.sdk.bytes,
-    sha256:originals.archives.sdk.sha256,integrity:originals.archives.sdk.sri,sourceCommit:originals.sdkSource,
+    sha256:originals.archives.sdk.sha256,sri:originals.archives.sdk.sri,sourceCommit:originals.sdkSource,
     protocol:{file:originals.archives.protocol.path,sha256:originals.archives.protocol.sha256,sri:originals.archives.protocol.sri}}
-    : JSON.parse(await readFile(resolve(root,"vendor/mdbase-sdk-dev-0ecbef41.json"),"utf8"));
+    : (await productionPin(root)).pin;
   const archive=resolve(root,"vendor",pin.artifact),bytes=await readFile(archive);
-  assert.equal(bytes.length,pin.bytes);assert.equal(hash(bytes,"sha256"),pin.sha256);assert.equal(`sha512-${hash(bytes,"sha512","base64")}`,pin.integrity);
-  const protocol=await readFile(resolve(root,pin.protocol.file));
-  assert.equal(hash(protocol,"sha256"),pin.protocol.sha256);assert.equal(`sha512-${hash(protocol,"sha512","base64")}`,pin.protocol.sri);
+  assert.equal(bytes.length,pin.bytes);assert.equal(hash(bytes,"sha256"),pin.sha256);assert.equal(`sha512-${hash(bytes,"sha512","base64")}`,pin.sri);
+  if(originals){
+    const protocol=await readFile(resolve(root,pin.protocol.file));
+    assert.equal(hash(protocol,"sha256"),pin.protocol.sha256);assert.equal(`sha512-${hash(protocol,"sha512","base64")}`,pin.protocol.sri);
+  }else{
+    const protocolPin=pin.bundledDependencies.find(dependency=>dependency.name==="@mdbase-dev/connect-protocol");
+    assert(protocolPin,"Production SDK pin must declare its bundled protocol original");
+    const pkg=JSON.parse(await readFile(resolve(root,"package.json"),"utf8"));
+    assert.equal(`package/${pkg.dependencies["@mdbase-dev/connect-protocol"].slice(5)}`,protocolPin.member,"Direct protocol must match the SDK bundled original");
+    const protocol=await readFile(resolve(root,protocolPin.member.slice("package/".length)));
+    assert.equal(protocol.length,protocolPin.bytes);assert.equal(hash(protocol,"sha256"),protocolPin.sha256);
+    assert.deepEqual(protocol,execFileSync("tar",["-xOf",archive,protocolPin.member],{maxBuffer:16*1024*1024}),"Direct protocol differs from the SDK bundled original");
+  }
   const installed=dirname(fileURLToPath(import.meta.resolve("@mdbase-dev/sdk")));
   // CP/log origins come only from the pinned packet's authenticated release
   // trust, which is minted for one exact environment. A packet qualified

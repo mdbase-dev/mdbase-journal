@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash, webcrypto } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { after, test } from "node:test";
 import { pathToFileURL } from 'node:url';
 import vm from "node:vm";
-import { legacyLabFixture } from './legacy-lab-fixture.mjs';
+import { pinnedSdkFixture } from './pinned-sdk-fixture.mjs';
 
-const fixture=await legacyLabFixture();after(()=>fixture.close());
+const fixture=await pinnedSdkFixture();after(()=>fixture.close());
 const at=path=>new URL(path,pathToFileURL(fixture.root+'/'));
 const { buildSdk } = await import(at('scripts/build-sdk.mjs'));
 await buildSdk();
@@ -28,10 +28,10 @@ function harness() {
   };
 }
 
-test("local compatibility build copies the original dev archive browser asset and derives SRI", () => {
+test("local compatibility build copies the current pinned archive browser asset and derives SRI", () => {
   assert.equal(createHash("sha256").update(browser).digest("hex"), SDK_ASSET.sha256);
   assert.equal(SDK_ASSET.integrity, `sha384-${createHash("sha384").update(browser).digest("base64")}`);
-  assert.equal(SDK_ASSET.sourceCommit, "0ecbef415a8b18cf7eb1bdbe41c2e963cc4de4d2");
+  assert.equal(SDK_ASSET.sourceCommit, fixture.pin.sourceCommit);
 });
 
 test("classic-script loader returns the actual SDK public namespaces without opening a client", async () => {
@@ -85,4 +85,11 @@ test("an unknown pre-existing SDK global is not accepted as the qualified asset"
   h.global.MdbaseSDK = {};
   assert.throws(() => loadNativeSdk(h), /already exists/);
   assert.equal(h.script, undefined);
+});
+
+test("compatibility build rejects installed browser drift and changed pinned archive bytes", async () => {
+  await writeFile(at('node_modules/@mdbase-dev/sdk/dist/browser/mdbase-sdk.min.js'), '// installed tampering\n');
+  await assert.rejects(()=>buildSdk(), /Installed SDK browser bytes differ/);
+  await writeFile(at('vendor/'+fixture.pin.artifact), 'changed archive original');
+  await assert.rejects(()=>buildSdk(), /committed SDK archive mismatch/);
 });
