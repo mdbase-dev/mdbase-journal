@@ -98,8 +98,19 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     button.textContent = retrying.has(id) ? "Retrying…" : "Retry saving";
     button.disabled = retrying.has(id);
   }
+  /** Only a storage refusal is reported as one. Anything else (a connection
+   * change that failed part way, say) leaves the stored text untouched, so it
+   * must not claim the text is at risk, and is logged for diagnosis. */
   function transaction(operation: () => void): void {
-    void drafts.mutate(operation).catch(() => {problem = "Keep this page open: Journal cannot preserve its text on this device."; render();});
+    void drafts.mutate(operation).catch(error => {
+      if (disposed) return;
+      if (error instanceof DraftPersistenceError) problem = error.message;
+      else {
+        console.error("Journal could not complete an update.", error);
+        problem = "Something went wrong. Your text is still on this device.";
+      }
+      render();
+    });
   }
   function clearUndo(): void {undoId = null; if (undoTimer !== null) clearTimeout(undoTimer); undoTimer = null;}
   let renderedDraftId = current.id;
@@ -158,13 +169,20 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     if (!message && catalogProblem) message = catalogProblem.title;
     if (!message && phase?.kind === "ready" && (phase.problem || state?.problem)) message = phase.problem?.title ?? describeError(state)?.title;
     // Never "Saving…" or "Saved" while offline, reconnecting or holding changes on this device.
+    // How loudly the footer speaks. "alert" needs attention and stays put;
+    // "notice" (not syncing, not signed in) is worth knowing but recedes while
+    // writing; "routine" autosave progress is only the dot, its words kept for
+    // hover and assistive technology.
+    let tone: "alert" | "notice" | "routine" = "alert";
     const notice = connectionNotice(state, document.defaultView?.navigator.onLine ?? true);
-    if (!message && notice) message = connectionNoticeLabels[notice];
-    if (!message && opening) message = "Saving…";
+    if (!message && notice) {message = connectionNoticeLabels[notice]; tone = "notice";}
+    if (!message && opening) {message = "Saving…"; tone = "routine";}
     if (!message && record) {
       message = record.state === "saved" && current.body === current.savedBody ? "Saved" : record.state === "saving" ? "Saving…" :
         record.state === "saved_on_device" ? "Saved on this device; waiting for sync" : "On this device";
+      tone = record.state === "saved_on_device" ? "notice" : "routine";
     }
+    if (!message) tone = phase?.kind === "problem" ? "alert" : phase?.kind === "ready" && data ? "routine" : "notice";
     if (!message) message = !phase ? "On this device. Sign-in is unavailable in this build." :
       phase.kind === "unavailable" ? `On this device. ${phase.problem.title}. ${phase.problem.message}` :
       phase.kind === "authorizing" ? "Waiting for approval in the mdbase window…" :
@@ -175,12 +193,17 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       phase.kind === "choosing" ? "Choose a collection. Your text stays on this device." :
       data ? "On this device" : "On this device. Sign in to save.";
     const warning = state?.saveWarning ? describeError(state.saveWarning) : null;
+    if (warning) tone = "alert";
     status.textContent = warning ? `${message} · ${warning.message}` : message;
+    const statusButton = element("status-button");
+    statusButton.classList.toggle("routine", tone === "routine");
+    statusButton.classList.toggle("notice", tone === "notice");
+    element("dot").className = tone === "alert" ? "dot pending" : message === "Saved" ? "dot saved" : "dot";
     // The footer truncates; the full explanation is also in settings.
     status.title = catalogProblem && message === catalogProblem.title ? `${message}. ${catalogProblem.detail}` : status.textContent;
     status.setAttribute("role", problem ? "alert" : "status");
     // The button's own name: what pressing it does, then the current status.
-    element("status-button").setAttribute("aria-label", `${problem && data ? "Save again" : "Journal settings"}. ${message}`);
+    statusButton.setAttribute("aria-label", `${problem && data ? "Save again" : "Journal settings"}. ${message}`);
     const other = unresolved.filter(draft => draft.targetCollectionId && draft.targetCollectionId !== state?.selectedCollectionId).length;
     const legacy = drafts.legacyPendingCount();
     pending.textContent = `${unresolved.length} note${unresolved.length === 1 ? "" : "s"} on this device${other ? `; ${other} waiting for another collection` : ""}${legacy ? `; ${legacy} earlier prototype note${legacy === 1 ? "" : "s"} preserved separately` : ""}`;
