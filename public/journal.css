@@ -25,7 +25,9 @@ textarea { display:block; width:100%; max-width:680px; min-height:100vh; min-hei
 .dot { width:6px; height:6px; border-radius:50%; background:var(--faint); flex:none; transition:background .3s; }
 .dot.saved { background:var(--accent); } .dot.pending { background:var(--warn); }
 .status,.hint { background:var(--bg); }
-.status.quiet { opacity:0; pointer-events:none; } .status.quiet:focus-visible { opacity:1; }
+.status.routine span { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+.status.notice { opacity:.55; } .status.notice:hover,.status.notice:focus-visible { opacity:1; }
+body.quiet .status.notice:not(:focus-visible) { opacity:0; pointer-events:none; }
 .hint { opacity:0; transition:opacity .6s ease; white-space:nowrap; border-radius:6px; }
 body.typing:not(.quiet) .hint,body.undo .hint,body.retry .hint,.hint:focus-within { opacity:1; }
 .hint button { min-height:44px; } #retry-button { margin:-6px 8px -6px -8px; color:var(--accent); } .count { margin-right:16px; font-variant-numeric:tabular-nums; }

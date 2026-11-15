@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {mock, test} from "node:test";
 import {readFileSync} from "node:fs";
 import {JSDOM} from "jsdom";
-import {JournalDrafts} from "../src/drafts.js";
+import {DraftPersistenceError, JournalDrafts} from "../src/drafts.js";
 import {mountJournal} from "../src/view.js";
 import {createJournalApplication, journalConnection} from "../src/application.js";
 import {applicationFixture, catalog, deferred, memoryStorage, snapshot} from "./support.js";
@@ -280,4 +280,46 @@ test("late catalog completion after disposal cannot start data writes or close a
   h.write("Local"); view.dispose(); job.resolve(catalog()); await Promise.resolve(); await Promise.resolve();
   assert.equal(create.mock.callCount(), 0); assert.equal(close.mock.callCount(), 0); assert.equal(f.records.link, "open");
   describe.mock.restore(); create.mock.restore(); close.mock.restore(); h.window.close(); f.close();
+});
+test("routine autosave is only the dot; not syncing is a notice; problems stay loud", async () => {
+  const f = await applicationFixture(), h = dom(), view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.mdbase);
+  const button = h.window.document.getElementById("status-button")!, dot = h.window.document.getElementById("dot")!;
+  try {
+    h.write("Quiet note");
+    await until(() => h.window.document.getElementById("status")!.textContent === "Saved" || undefined, 1000);
+    assert.equal(button.classList.contains("routine"), true); assert.equal(button.classList.contains("notice"), false);
+    assert.equal(dot.className, "dot saved");
+    assert.match(button.getAttribute("aria-label")!, /Saved$/, "the words stay available to assistive technology");
+    f.fixture.controls.publishSnapshot(snapshot());
+    assert.match(h.window.document.getElementById("status")!.textContent!, /Sign in to save/);
+    assert.equal(button.classList.contains("notice"), true); assert.equal(button.classList.contains("routine"), false);
+    assert.equal(dot.className, "dot");
+  } finally {view.dispose(); f.close(); h.window.close();}
+  const local = dom(), drafts = new JournalDrafts(memoryStorage()), quiet = mountJournal(local.window.document, drafts, null);
+  const fail = mock.method(drafts, "put", () => {throw new DraftPersistenceError();});
+  try {
+    local.write("Unsaved");
+    await until(() => /cannot preserve/.test(local.window.document.getElementById("status")!.textContent!) || undefined);
+    const status = local.window.document.getElementById("status-button")!;
+    assert.equal(status.classList.contains("routine") || status.classList.contains("notice"), false);
+    assert.equal(local.window.document.getElementById("dot")!.className, "dot pending");
+  } finally {fail.mock.restore(); quiet.dispose(); local.window.close();}
+});
+test("an unexpected failure during a connection change is not reported as lost text", async () => {
+  const f = await applicationFixture(), h = dom(), drafts = new JournalDrafts(memoryStorage());
+  const view = mountJournal(h.window.document, drafts, f.mdbase);
+  const records = journalConnection(f.mdbase)!.records;
+  const logged = mock.method(console, "error", () => {});
+  try {
+    h.write("Kept text");
+    f.fixture.controls.publishSnapshot(snapshot());
+    const broken = mock.method(records, "onStatus", () => {throw new Error("listener failed");});
+    try {
+      f.fixture.controls.publishSnapshot(f.ready);
+      const status = await until(() => {const text = h.window.document.getElementById("status")!.textContent!; return text.startsWith("Something went wrong") ? text : undefined;});
+      assert.doesNotMatch(status, /cannot preserve/);
+      assert.equal(logged.mock.callCount(), 1); assert.equal((logged.mock.calls[0]!.arguments[1] as Error).message, "listener failed");
+      assert.ok(drafts.list().some(draft => draft.body === "Kept text"));
+    } finally {broken.mock.restore();}
+  } finally {logged.mock.restore(); view.dispose(); f.close(); h.window.close();}
 });
