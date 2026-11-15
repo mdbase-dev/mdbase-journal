@@ -4,23 +4,29 @@ export const JOURNAL_CONTRACT = Object.freeze({id: "journal.entry", version: "0.
 export interface JournalEntryType {readonly name: string; readonly createdField: string}
 export interface JournalEntry {readonly id: string; readonly created: string; readonly createdMs: number; readonly path: string}
 export const DELETED_ENTRY_NOTICE = "This entry was deleted elsewhere. Your text stays on this device.";
+/** The collection's catalog cannot give Journal an entry type. SDK readiness
+ * checks only that the contract exists and some type claims it; these are the
+ * further bindings Journal needs. The message is shown to the writer. */
+export class JournalCatalogError extends Error {
+  override readonly name = "JournalCatalogError";
+}
 /** Only current canonical catalog bindings, never the starter type name. */
 export function journalEntryTypes(catalog: DescribeResult): JournalEntryType[] {
   const contract = catalog.contracts.filter(c => c.id === JOURNAL_CONTRACT.id && c.version === JOURNAL_CONTRACT.version && c.digest === JOURNAL_CONTRACT.digest);
-  if (contract.length !== 1) throw new Error("This collection does not provide the required Journal contract.");
+  if (contract.length !== 1) throw new JournalCatalogError("This collection does not provide the required Journal contract (journal.entry 0.1.0). Set up Journal in it again.");
   const types: JournalEntryType[] = [];
   for (const type of catalog.types) {
     const implementations = type.implements.filter(i => i.contract === JOURNAL_CONTRACT.id && i.version === JOURNAL_CONTRACT.version);
-    if (implementations.length > 1) throw new Error("This collection has an ambiguous Journal type binding.");
+    if (implementations.length > 1) throw new JournalCatalogError(`The type ${type.name} has an ambiguous Journal type binding: it implements journal.entry 0.1.0 more than once.`);
     const field = implementations[0]?.fields["created"];
     if (field === undefined) continue;
     // The native public create API accepts top-level fields. Do not implement a
     // second field-reference parser or silently write a dotted literal key.
-    if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(field)) throw new Error("This Journal type needs field-reference support in the shared SDK.");
-    if (types.some(existing => existing.name === type.name)) throw new Error("This collection has an ambiguous Journal type name.");
+    if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(field)) throw new JournalCatalogError(`The type ${type.name} maps the journal.entry created field to ${field}. Journal can only write a top-level field.`);
+    if (types.some(existing => existing.name === type.name)) throw new JournalCatalogError(`This collection has an ambiguous Journal type name: ${type.name}.`);
     types.push(Object.freeze({name: type.name, createdField: field}));
   }
-  if (!types.length) throw new Error("This collection has no Journal entry type.");
+  if (!types.length) throw new JournalCatalogError("This collection has no Journal entry type: no type maps the journal.entry created field.");
   return types;
 }
 /** A readable original record: confirmed, or kept on this device while the SDK

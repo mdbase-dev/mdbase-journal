@@ -1,12 +1,23 @@
-import {describeError, type Mdbase, type MdbaseErrorDescription, type MdbaseSnapshot} from "@mdbase-dev/sdk";
+import {describeDiagnostic, describeError, type Mdbase, type MdbaseSnapshot} from "@mdbase-dev/sdk";
 import {mountCollectionUi, type MountedCollectionUi} from "@mdbase-dev/ui/collections";
 import {journalConnection} from "./application.js";
 import {DraftConflictError, DraftPersistenceError, draftRevision, JournalDrafts, notePath, type JournalDraft} from "./drafts.js";
-import {DELETED_ENTRY_NOTICE, JournalData, type JournalEntry, type JournalEntryType} from "./journal-data.js";
+import {DELETED_ENTRY_NOTICE, JournalCatalogError, JournalData, type JournalEntry, type JournalEntryType} from "./journal-data.js";
 import {DraftOpens} from "./draft-opens.js";
 import {connectionNotice, connectionNoticeLabels} from "./connection-notice.js";
 export interface JournalView {dispose(): void; currentDraft(): JournalDraft; newPage(): void; undoNewPage(): void}
 const app = {name: "Journal"};
+interface TypesProblem {readonly title: string; readonly detail: string}
+/** Why the open collection gives Journal no entry type. Journal's own catalog
+ * checks explain themselves; SDK errors use SDK copy; anything else is named
+ * for what failed rather than as a bare generic error. */
+export function typesProblem(error: unknown): TypesProblem {
+  const kept = "Your notes stay on this device until it is fixed.";
+  if (error instanceof JournalCatalogError) return {title: "Journal can't save to this collection", detail: `${error.message} ${kept}`};
+  const described = describeError(error);
+  if (described && described.key !== "unknown" && described.key !== "internal") return {title: described.title, detail: `${described.message} ${kept}`};
+  return {title: "Journal couldn't read this collection's entry types", detail: `Reload to try again. ${kept}`};
+}
 /** Writing over the page's one mdbase entry. Local text never depends on sign-in.
  * The shared collection UI owns sign-in, the collection list, setup, problems and
  * sign-out (settings panel and header switcher); the view only releases its
@@ -30,7 +41,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   let unlistenStatus: (() => void) | null = null;
   let unlistenEntries: (() => void) | null = null;
   let refreshEntries: (() => Promise<void>) | null = null;
-  let actionProblem: MdbaseErrorDescription | null = null;
+  let catalogProblem: TypesProblem | null = null;
   let types: JournalEntryType[] = [];
   let type: JournalEntryType | null = null;
   let problem: string | null = null;
@@ -144,7 +155,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     if (!message && current.reviewRequired) message = "Your text is on this device. Resolve its original save before continuing.";
     if (!message && opening?.state === "unresolved") message = "The original save is unresolved. Your text stays on this device.";
     if (!message && record && ["conflict", "recovery", "deleted", "error"].includes(record.state)) message = "Your text is on this device. Resolve its original save before continuing.";
-    if (!message && actionProblem) message = actionProblem.title;
+    if (!message && catalogProblem) message = catalogProblem.title;
     if (!message && phase?.kind === "ready" && (phase.problem || state?.problem)) message = phase.problem?.title ?? describeError(state)?.title;
     // Never "Saving…" or "Saved" while offline, reconnecting or holding changes on this device.
     const notice = connectionNotice(state, document.defaultView?.navigator.onLine ?? true);
@@ -165,6 +176,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       data ? "On this device" : "On this device. Sign in to save.";
     const warning = state?.saveWarning ? describeError(state.saveWarning) : null;
     status.textContent = warning ? `${message} · ${warning.message}` : message;
+    // The footer truncates; the full explanation is also in settings.
+    status.title = catalogProblem && message === catalogProblem.title ? `${message}. ${catalogProblem.detail}` : status.textContent;
     status.setAttribute("role", problem ? "alert" : "status");
     // The button's own name: what pressing it does, then the current status.
     element("status-button").setAttribute("aria-label", `${problem && data ? "Save again" : "Journal settings"}. ${message}`);
@@ -205,7 +218,8 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     const retryCurrent = recovering(current.id), retryElement = element<HTMLButtonElement>("retry-button");
     retryElement.hidden = !retryCurrent; retryButton(retryElement, current.id);
     document.body.classList.toggle("retry", retryCurrent);
-    element("menu-connection").textContent = openId ? `Notes save to ${name}.` : "Notes stay on this device until a collection is open.";
+    element("menu-connection").textContent = openId && catalogProblem ? `${catalogProblem.title}. ${catalogProblem.detail}` :
+      openId ? `Notes save to ${name}.` : "Notes stay on this device until a collection is open.";
     document.body.classList.toggle("undo", !!undoId);
     element("keys").textContent = /Mac|iPhone|iPad/.test(document.defaultView?.navigator.platform ?? "") ? "⌘↩" : "Ctrl+↩";
     const words = segmenter ? [...segmenter.segment(current.body)].filter(item => item.isWordLike).length : current.body.match(/\S+/g)?.length ?? 0;
@@ -355,7 +369,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     const next = journalConnection(mdbase);
     if (next !== data?.connection) {
       unlistenData?.(); unlistenData = null; unlistenStatus?.(); unlistenStatus = null; unlistenEntries?.(); unlistenEntries = null; refreshEntries = null;
-      opens?.dispose(); opens = null; data?.release(); data = null; types = []; type = null; actionProblem = null;
+      opens?.dispose(); opens = null; data?.release(); data = null; types = []; type = null; catalogProblem = null;
       entries = []; entriesLoading = false;
       if (next) {
         const owned = new JournalData(next, drafts); data = owned;
@@ -382,21 +396,35 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
         refreshEntries = refresh;
         opens = new DraftOpens(owned, drafts, () => !disposed && data === owned && owned.connection.isCurrent(), render, document.defaultView?.navigator.locks);
         unlistenData = owned.subscribe(render);
+        // Entry types come from the collection's catalog. Until they load, notes
+        // stay on this device; a failed read is retried when the collection
+        // changes (for example after its type is repaired) or its status does.
+        let loadingTypes = false;
+        const loadTypes = (): void => {
+          if (disposed || data !== owned || types.length || loadingTypes) return;
+          loadingTypes = true;
+          void owned.types().then(value => {
+            loadingTypes = false;
+            if (disposed || data !== owned) return;
+            catalogProblem = null;
+            types = value; type = value.find(item => item.name === preferences.entryTypes?.[owned.connection.id]) ?? (value.length === 1 ? value[0]! : null);
+            render(); void save();
+            void refresh();
+            if (entriesDialog.open) browse(entryDate.value);
+          }, error => {
+            loadingTypes = false;
+            if (disposed || data !== owned) return;
+            catalogProblem = typesProblem(error);
+            console.warn("Journal could not load entry types from the open collection.", describeDiagnostic(error) ?? error);
+            entriesLoading = false; entriesProblem = "Saved entries could not be loaded. Notes on this device are still available."; render();
+          });
+        };
         // A status push (back online, pending writes settled) is when a failed open can succeed.
-        unlistenStatus = next.records.onStatus(() => {save(); void refresh();});
-        const watch = next.records.watchChanges(() => {void refresh();});
+        unlistenStatus = next.records.onStatus(() => {save(); loadTypes(); void refresh();});
+        const watch = next.records.watchChanges(() => {loadTypes(); void refresh();});
         unlistenEntries = watch;
         void watch.ready.catch(() => {/* Next status change or browsing retries the read. */});
-        void owned.types().then(value => {
-          if (disposed || data !== owned) return;
-          types = value; type = value.find(item => item.name === preferences.entryTypes?.[owned.connection.id]) ?? (value.length === 1 ? value[0]! : null);
-          render(); void save();
-          void refresh();
-          if (entriesDialog.open) browse(entryDate.value);
-        }, error => {if (!disposed && data === owned) {
-          actionProblem = describeError(error) ?? describeError("internal");
-          entriesLoading = false; entriesProblem = "Saved entries could not be loaded. Notes on this device are still available."; render();
-        }});
+        loadTypes();
       }
     }
     if (!memoryOnly && selectionChanged && selectedId !== current.targetCollectionId) {
