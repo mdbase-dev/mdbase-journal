@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {mock, test} from "node:test";
 import {JournalDrafts} from "../src/drafts.js";
-import {JournalData, journalEntryTypes} from "../src/journal-data.js";
+import {JournalCatalogError, JournalData, journalEntryTypes} from "../src/journal-data.js";
 import {applicationFixture, catalog, deferred, memoryStorage} from "./support.js";
 
 test("catalog uses exact contract semantics and collection-owned field names", () => {
@@ -9,7 +9,7 @@ test("catalog uses exact contract semantics and collection-owned field names", (
   assert.deepEqual(journalEntryTypes(value), [{name: "my-entry", createdField: "written"}]);
   value.contracts[0]!.digest = "sha256:" + "0".repeat(64);
   assert.throws(() => journalEntryTypes(value), /required Journal contract/);
-  assert.throws(() => journalEntryTypes(catalog("meta.created")), /shared SDK/);
+  assert.throws(() => journalEntryTypes(catalog("meta.created")), (error: unknown) => error instanceof JournalCatalogError && /top-level field/.test(error.message));
 });
 test("missing or ambiguous contract implementations never pick the starter name", () => {
   const value = catalog(); value.types[0]!.implements.push(value.types[0]!.implements[0]!);
