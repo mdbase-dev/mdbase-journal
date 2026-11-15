@@ -5,11 +5,24 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { provenSource } from "./sdk-provenance.mjs";
+import { sdkReleaseIsPrerelease } from "./sdk-version.mjs";
 const repository = "mdbase-dev/mdbase-connect";
 const workflow = "publish-sdk-npm.yml";
 const need = (ok, message) => {
   if (!ok) throw Error("SDK authentication refusal: " + message);
 };
+// A beta pin's GitHub release is a prerelease; a plain version's is not.
+function exactRelease(release, tag) {
+  const prerelease = sdkReleaseIsPrerelease(tag.slice("sdk-v".length));
+  need(
+    tag.startsWith("sdk-v") &&
+      prerelease !== undefined &&
+      release.tag_name === tag &&
+      release.prerelease === prerelease &&
+      release.draft === false,
+    prerelease === false ? "exact SDK release required" : "exact SDK prerelease required",
+  );
+}
 const retryable = (status) => status === 403 || status === 408 || status === 429 || status >= 500;
 // Authentication judges the bytes, so repeating a public read cannot weaken it.
 export async function publicBytes(url, fetchImpl = fetch, delays = [5000, 20000, 60000, 120000], headers = {}) {
@@ -51,7 +64,7 @@ export async function archiveBytes(url,fetchImpl=fetch,token=process.env.GITHUB_
  const [,tag,name]=match;
  const release=JSON.parse(await publicBytes(`https://api.github.com/repos/${repository}/releases/tags/${tag}`,fetchImpl,undefined,
   {authorization:`Bearer ${token}`}));
- need(release.tag_name===tag && release.prerelease===true && release.draft===false,'exact SDK prerelease required');
+ exactRelease(release,tag);
  return assetBytes(releaseAsset(release,tag,name),fetchImpl,token);
 }
 export async function authenticateProduction(
@@ -84,10 +97,7 @@ export async function stagingArchive(pin, { fetchImpl = fetch, run = execFileSyn
   const release = JSON.parse(
     await publicBytes(`https://api.github.com/repos/${repository}/releases/tags/${tag}`, fetchImpl, undefined, api),
   );
-  need(
-    release.tag_name === tag && release.prerelease === true && release.draft === false,
-    "exact SDK prerelease required",
-  );
+  exactRelease(release, tag);
   const archive = releaseAsset(release, tag, "sdk-staging.tgz"),
     bundle = releaseAsset(release, tag, "sdk-staging.tgz.sigstore.json");
   const download = async (a) => {
