@@ -9,6 +9,7 @@ import {it} from 'node:test';
 import {createRequire} from 'node:module';
 const {parse}=createRequire(new URL('../../node_modules/@mdbase-dev/sdk/package.json',import.meta.url))('yaml');
 import {prepareInstall} from './install-inputs.mjs';
+import {sdkReleaseIsPrerelease} from './sdk-version.mjs';
 import {compareInstalled,productionPin} from './originals.mjs';
 const repoRoot=fileURLToPath(new URL('../../',import.meta.url));
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -42,7 +43,7 @@ it('authenticates staging installation without weakening original digest or inst
  const seen=[];
  const fetchImpl=async(request,init)=>{
   seen.push(request);assert.equal(init.headers.authorization,'Bearer test-job-token');
-  if(request===metadata)return Response.json({tag_name:tag,prerelease:true,draft:false,assets:[{id:100,name:'sdk-staging.tgz',digest:'sha256:'+sha(bytes),browser_download_url:url}]});
+  if(request===metadata)return Response.json({tag_name:tag,prerelease:sdkReleaseIsPrerelease(pin.version),draft:false,assets:[{id:100,name:'sdk-staging.tgz',digest:'sha256:'+sha(bytes),browser_download_url:url}]});
   assert.equal(request,asset);assert.equal(init.headers.accept,'application/octet-stream');return new Response(bytes);
  };
  const wrong=async(request,init)=>request===metadata?fetchImpl(request,init):new Response('wrong bytes');
