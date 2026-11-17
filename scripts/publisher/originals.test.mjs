@@ -32,3 +32,26 @@ it('derives only the ephemeral SDK install and preserves every other frozen depe
   await assert.rejects(prepareInstall({target:'staging',sdkTrust},temp,async()=>new Response('wrong bytes')),/Staging original changed/);
  }finally{await rm(temp,{recursive:true,force:true});}
 });
+it('accepts an exact published UI pin only when the registry tarball matches the lock, then gates installed members',async()=>{
+ const {execFileSync}=await import('node:child_process'),{createHash}=await import('node:crypto'),{writeFile}=await import('node:fs/promises');
+ const {compareInstalled,directOriginal,originalMembers}=await import('./originals.mjs');
+ const temp=await mkdtemp(join(tmpdir(),'journal-registry-original-'));
+ try {
+  const name='@mdbase-dev/ui',source=join(temp,'source/package');await mkdir(source,{recursive:true});
+  await writeFile(join(source,'package.json'),JSON.stringify({name,version:'9.9.9'}));await writeFile(join(source,'index.js'),'export {};\n');
+  const bytes=execFileSync('tar',['-czf','-','-C',join(temp,'source'),'package']),sri='sha512-'+createHash('sha512').update(bytes).digest('base64');
+  const resolved='https://registry.npmjs.org/@mdbase-dev/ui/-/ui-9.9.9.tgz',lock={packages:{['node_modules/'+name]:{version:'9.9.9',resolved,integrity:sri}}};
+  const fetchImpl=async url=>{assert.equal(url,resolved);return new Response(bytes);};
+  const {original,path}=await directOriginal(temp,{dependencies:{[name]:'9.9.9'}},lock,name,{registry:true,fetchImpl});
+  assert.deepEqual(original,bytes);assert.equal(path,undefined);
+  await assert.rejects(directOriginal(temp,{dependencies:{[name]:'9.9.9'}},lock,name,{registry:true,fetchImpl:async()=>new Response('other bytes')}),/does not match the lock/);
+  await assert.rejects(directOriginal(temp,{dependencies:{[name]:'^9.9.9'}},lock,name,{registry:true,fetchImpl}),/exact published version/);
+  await assert.rejects(directOriginal(temp,{dependencies:{[name]:'9.9.9'}},lock,name,{registry:false,fetchImpl}),/committed original required/);
+  const installed=join(temp,'node_modules',name);await cp(source,installed,{recursive:true});
+  const archives={ui:{name,resolved,sri,members:originalMembers(bytes)}};
+  await compareInstalled(temp,archives);
+  await writeFile(join(installed,'index.js'),'changed installed member');
+  await assert.rejects(compareInstalled(temp,archives),/ALL installed original/);
+  await assert.rejects(compareInstalled(temp,{ui:{name,resolved,sri}}),/registry original members required/);
+ }finally{await rm(temp,{recursive:true,force:true});}
+});

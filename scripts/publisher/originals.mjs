@@ -6,7 +6,7 @@ import {lstat,readFile,readdir,realpath} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import {join,relative} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {authenticateProduction,stagingArchive} from './authentication.mjs';
+import {authenticateProduction,publicBytes,stagingArchive} from './authentication.mjs';
 const hash=(bytes,algorithm='sha256')=>createHash(algorithm).update(bytes).digest(algorithm==='sha512'?'base64':'hex');
 const json=async path=>JSON.parse(await readFile(path,'utf8'));
 export const digestNames=['JOURNAL_TRUST_ASSET_SHA256'];
@@ -52,12 +52,30 @@ export async function productionPin(root) {
 }
 export async function compareInstalled(root,archives) {
  for(const original of Object.values(archives)) {
-  const bytes=await regular(root,original.path);assert.equal(hash(bytes),original.sha256,'comparison original changed');
-  const members=originalMembers(bytes),owns=path=>members.some(m=>m.path===path||m.path.startsWith(path+'/'));
+  // A vendored original is re-read from the checkout; a registry original was
+  // fetched and SRI-checked against the lock by loadOriginals, which recorded its members.
+  let members;
+  if(original.path){const bytes=await regular(root,original.path);assert.equal(hash(bytes),original.sha256,'comparison original changed');members=originalMembers(bytes);}
+  else {assert(Array.isArray(original.members)&&original.members.length,'registry original members required');members=original.members;}
+  const owns=path=>members.some(m=>m.path===path||m.path.startsWith(path+'/'));
   const ignored=!owns('node_modules')?new Set(['node_modules']):!owns('node_modules/.bin')?new Set(['node_modules/.bin']):new Set();
   const installed=await realpath(join(root,'node_modules',original.name));assert(!relative(root,installed).startsWith('..'),'originals outside checkout');
   assert.deepEqual(await installedMembers(installed,ignored),members,'ALL installed original members differ: '+original.name);
  }
+}
+// A direct dependency is either a committed vendor archive or, where allowed, an
+// exact published registry version whose tarball must match the lock's integrity.
+export async function directOriginal(root,pkg,lock,name,{registry,fetchImpl}) {
+ const spec=pkg.dependencies[name],entry=lock.packages['node_modules/'+name];assert(entry,'locked original required: '+name);
+ if(/^file:vendor\/[\w.-]+\.tgz$/.test(spec)) {
+  const path=spec.slice(5),original=await regular(root,path);
+  assert.equal(entry.resolved,spec);assert.equal(entry.integrity,'sha512-'+hash(original,'sha512'));return {original,path};
+ }
+ assert(registry,'committed original required: '+name);
+ assert.match(spec,/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/,'exact published version required: '+name);
+ assert.equal(entry.version,spec);assert.equal(entry.resolved,`https://registry.npmjs.org/${name}/-/${name.split('/').pop()}-${spec}.tgz`);
+ const original=await publicBytes(entry.resolved,fetchImpl);
+ assert.equal(entry.integrity,'sha512-'+hash(original,'sha512'),'registry original does not match the lock: '+name);return {original};
 }
 export async function loadOriginals({target,repoRoot,hashes,installed=false,fetchImpl=fetch,authenticate=authenticateProduction,stage=stagingArchive}) {
  assert(['production','staging'].includes(target));protectedHashes(hashes);
@@ -71,10 +89,11 @@ export async function loadOriginals({target,repoRoot,hashes,installed=false,fetc
  const sdkPath=target==='production'?spec.slice(5):'vendor/sdk-staging.tgz';
  archives.sdk={name:'@mdbase-dev/sdk',path:sdkPath,bytes:bytes.length,sha256:hash(bytes),sri:'sha512-'+hash(bytes,'sha512')};
  for(const [key,name] of [['protocol','@mdbase-dev/connect-protocol'],['ui','@mdbase-dev/ui']]) {
-  const spec=pkg.dependencies[name];assert.match(spec,/^file:vendor\/[\w.-]+\.tgz$/);const path=spec.slice(5),original=await regular(repoRoot,path);
-  const entry=lock.packages['node_modules/'+name];assert.equal(entry.resolved,spec);assert.equal(entry.integrity,'sha512-'+hash(original,'sha512'));
+  const {original,path}=await directOriginal(repoRoot,pkg,lock,name,{registry:key==='ui',fetchImpl});
+  const entry=lock.packages['node_modules/'+name];
   const manifest=JSON.parse(member(original,'package.json'));assert.equal(manifest.name,name);assert.equal(manifest.version,entry.version);
-  archives[key]={name,path,bytes:original.length,sha256:hash(original),sri:entry.integrity};
+  archives[key]=path?{name,path,bytes:original.length,sha256:hash(original),sri:entry.integrity}
+   :{name,resolved:entry.resolved,bytes:original.length,sha256:hash(original),sri:entry.integrity,members:originalMembers(original)};
   if(key==='protocol')for(const sdk of [production,bytes]) {
    const sdkPackage=JSON.parse(member(sdk,'package.json')),protocolPath=sdkPackage.dependencies[name];assert.match(protocolPath,/^file:vendor\/[\w.-]+\.tgz$/);
    assert(member(sdk,protocolPath.slice(5)).equals(original),'direct protocol must equal authenticated SDK bundled original');
