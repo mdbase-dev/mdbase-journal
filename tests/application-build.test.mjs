@@ -35,10 +35,17 @@ test("consumer build retains original same-artifact Worker/native bytes and no p
     const result=await buildApplication({writingOnly:true,env:{},output});
     assert.equal(result.inputs,null);assert.equal(result.writingOnly,true);
     assert(Object.keys(result.sdk.inputs).every(path=>!path.includes("/testing/")));
-    const inputs=Object.keys(result.application.inputs),bundled=inputs.filter(path=>path.startsWith("node_modules/"));
+    // The fixture symlinks most dependencies to this checkout, so esbuild reports
+    // them by real path (../node_modules/...); they are the same locked packages.
+    const inputs=Object.keys(result.application.inputs).map(path=>path.replace(/^\.\.\/(?=node_modules\/)/,"")),bundled=inputs.filter(path=>path.startsWith("node_modules/"));
     assert.deepEqual(inputs.filter(path=>!bundled.includes(path)).sort(),["public/.well-known/mdbase-app.json","src/application.ts","src/connection-notice.ts","src/draft-opens.ts","src/drafts.ts","src/grant-callback.ts","src/journal-data.ts","src/main.ts","src/returning-notice.ts","src/view.ts"]);
-    // Bundled: the shared collection UI with React, and only the SDK's describe (copy) modules.
-    assert.deepEqual([...new Set(bundled.map(path=>path.split("/").slice(1,path.startsWith("node_modules/@")?3:2).join("/")))].sort(),["@mdbase-dev/sdk","@mdbase-dev/ui","react","react-dom","scheduler"]);
+    // Bundled packages follow the published pins: each is a locked runtime (non-dev)
+    // package, and the bundle carries the SDK, the shared collection UI and React.
+    const lock=JSON.parse(await readFile(resolve(root,"package-lock.json"),"utf8"));
+    const lockKey=path=>{const parts=path.split("/");let key=[];for(let i=0;i<parts.length-1;i++)if(parts[i]==="node_modules"){const end=i+(parts[i+1].startsWith("@")?3:2);key=parts.slice(0,end);i=end-1;}return key.join("/");};
+    const packages=[...new Set(bundled.map(lockKey))].sort();
+    for(const key of packages)assert(lock.packages[key]&&!lock.packages[key].dev&&!lock.packages[key].devOptional,`bundled ${key} is not a locked runtime dependency`);
+    for(const name of ["@mdbase-dev/sdk","@mdbase-dev/ui","react","react-dom"])assert(packages.includes(`node_modules/${name}`),`bundle lacks ${name}`);
     assert(bundled.filter(path=>path.startsWith("node_modules/@mdbase-dev/sdk/")).every(path=>!/\/(testing|native)\/|application\/(entry|worker)/.test(path)));
     // collections.css @imports brand, motion and screens; they ship inlined.
     const collections=await readFile(resolve(output,"mdbase-collections.css"),"utf8");
