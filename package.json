@@ -20,8 +20,8 @@
     "test:publisher": "node --test --test-concurrency=1 scripts/publisher/*.test.mjs tests/native-publish-bytes.test.mjs tests/native-hosting.test.mjs"
   },
   "dependencies": {
-    "@mdbase-dev/connect-protocol": "file:vendor/mdbase-dev-connect-protocol-0.1.0-beta.145-e6e66bcd172f.tgz",
-    "@mdbase-dev/sdk": "file:vendor/sdk-3320267c-production-beta231.tgz",
+    "@mdbase-dev/connect-protocol": "file:vendor/mdbase-dev-connect-protocol-0.1.0-beta.152-3d3f95b80c9a.tgz",
+    "@mdbase-dev/sdk": "file:vendor/sdk-e433a42f-production-0.1.7.tgz",
     "@mdbase-dev/ui": "0.1.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
