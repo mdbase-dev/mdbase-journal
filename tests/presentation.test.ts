@@ -20,3 +20,6 @@ for (const [theme, selector] of [["light", /:root\s*\{([^}]+)\}/], ["dark", /:ro
     }
   });
 }
+test("the writing page shows no focus ring, even under the shared UI's global :focus-visible rule", () => {
+  assert.match(css, /#page:focus-visible\s*\{\s*outline:0;\s*\}/);
+});
