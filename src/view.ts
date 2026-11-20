@@ -269,14 +269,16 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     try {current = drafts.patch(previous.id, {finished: false}); unpersistedDraft = false; clearUndo(); renderPage(); render(); page.focus();}
     catch {problem = "Keep this page open: Journal cannot restore the previous draft safely."; render();}
   });}
-  function restoreDraft(id: string): void {transaction(() => {
+  function restoreDraft(id: string, onSelected?: () => void): void {transaction(() => {
     if (disposed || memoryOnly) return;
     try {
       const earlier = drafts.get(id);
       if (!earlier) throw new DraftPersistenceError();
       if (current.body.trim()) drafts.patch(current.id, {finished: true, touchedMs: Date.now()});
       current = drafts.patch(id, {finished: false, touchedMs: Date.now()}); unpersistedDraft = false;
-      clearUndo(); problem = null; renderPage(); save(); page.focus();
+      clearUndo(); problem = null; renderPage(); save();
+      if (current.id === id) onSelected?.();
+      page.focus();
     } catch {problem = "Keep this page open: Journal cannot restore the earlier text safely."; render();}
   });}
   function visibleEntries(): {entry: JournalEntry; draft: JournalDraft | null}[] {
@@ -301,13 +303,13 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       if (draft?.deletedElsewhere) summary.textContent = `Deleted elsewhere · ${summary.textContent || "Your text stays on this device"}`;
       button.append(date, summary); button.disabled = memoryOnly;
       button.onclick = () => {
-        if (draft) {restoreDraft(draft.id); if (current.id === draft.id) entriesDialog.close(); return;}
+        if (draft) {restoreDraft(draft.id, closeEntries); return;}
         const owned = data;
         if (!owned || memoryOnly) return;
         button.disabled = true;
         void owned.resume(entry).then(value => {
           if (disposed || data !== owned) return;
-          restoreDraft(value.id); if (current.id === value.id) entriesDialog.close();
+          restoreDraft(value.id, closeEntries);
         }, () => {if (!disposed && data === owned) {entriesProblem = "This entry could not be opened. Your current page is unchanged."; renderEntries();}});
       };
       return button;
@@ -324,13 +326,14 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     if (!types.length) return;
     void refreshEntries?.();
   }
-  function startOnDate(date: Date): void {transaction(() => {
+  function closeEntries(): void {entriesDialog.close();}
+  function startOnDate(date: Date, onSelected?: () => void): void {transaction(() => {
     if (memoryOnly || !Number.isFinite(date.getTime())) return;
     try {
       const next = drafts.blank(snapshot()?.selectedCollectionId ?? null, date);
       if (current.body.trim()) drafts.patch(current.id, {finished: true, touchedMs: Date.now()});
       current = next; unpersistedDraft = true;
-      clearUndo(); problem = null; renderPage(); render(); page.focus();
+      clearUndo(); problem = null; renderPage(); render(); onSelected?.(); page.focus();
     } catch {problem = "Keep this page open: Journal cannot preserve its text on this device."; render();}
   });}
   let navigatingDay = false;
@@ -369,12 +372,10 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   listen(element("previous-day"), "click", () => {void adjacentDay(-1);});
   listen(element("next-day"), "click", () => {void adjacentDay(1);});
   listen(entryDate, "input", renderEntries);
-  listen(element("close-entries"), "click", () => entriesDialog.close());
+  listen(element("close-entries"), "click", closeEntries);
   listen(entriesDialog, "close", () => page.focus());
   listen(element("write-date"), "click", () => {
-    const originalId = current.id;
-    startOnDate(entryDate.value ? new Date(`${entryDate.value}T12:00:00`) : new Date());
-    if (current.id !== originalId) entriesDialog.close();
+    startOnDate(entryDate.value ? new Date(`${entryDate.value}T12:00:00`) : new Date(), closeEntries);
   });
   function save(): void {
     const owned = data, selectedType = type ?? undefined, queue = opens;
