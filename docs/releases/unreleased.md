@@ -1,5 +1,7 @@
 # Unreleased
 
+- Choosing a date or a saved entry closes the entries dialog and returns focus to the writer.
+
 - The entries sheet now lists saved entries in large collections instead of showing only notes on this device.
 
 - Screen reader users can jump to the current journal date as the page’s main heading. The date still opens the entry picker.

@@ -7,6 +7,31 @@ import {JournalData, journalEntryTypes, type JournalEntry} from "../src/journal-
 import {mountJournal} from "../src/view.js";
 import {applicationFixture, catalog, deferred, memoryStorage} from "./support.js";
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+test("choosing a date or saved entry closes the picker and focuses the writer after the draft lock runs", async () => {
+  const window = new JSDOM(html, {url: "https://journal.fixture/"}).window, document = window.document;
+  const drafts = new JournalDrafts(memoryStorage(), undefined, operation => Promise.resolve().then(operation));
+  const saved = await drafts.mutate(() => drafts.patch(drafts.create(null).id, {body: "Earlier writing"}));
+  const view = await drafts.mutate(() => mountJournal(document, drafts, null));
+  const dialog = document.querySelector<HTMLDialogElement>("#entries")!, page = document.querySelector<HTMLTextAreaElement>("#page")!;
+  dialog.showModal = () => dialog.setAttribute("open", ""); dialog.close = () => dialog.removeAttribute("open");
+  async function select(button: HTMLButtonElement) {
+    button.focus(); button.click();
+    assert.equal(dialog.open, true);
+    await drafts.mutate(() => {});
+    assert.equal(dialog.open, false);
+    assert.equal(document.activeElement, page);
+  }
+  try {
+    document.getElementById("browse-button")!.click();
+    document.querySelector<HTMLInputElement>("#entry-date")!.value = "2025-01-02";
+    await select(document.querySelector<HTMLButtonElement>("#write-date")!);
+    assert.equal(view.currentDraft().created.slice(0, 10), "2025-01-02");
+    document.getElementById("browse-button")!.click();
+    await select(document.querySelector<HTMLButtonElement>("#entry-list button")!);
+    assert.equal(view.currentDraft().id, saved.id);
+    assert.equal(page.value, saved.body);
+  } finally {view.dispose(); window.close();}
+});
 test("date navigation lists every local page, resumes its identity and survives reload", () => {
   const window = new JSDOM(html, {url: "https://journal.fixture/"}).window, document = window.document;
   const drafts = new JournalDrafts(memoryStorage());
@@ -122,14 +147,15 @@ test("a refused day lookup keeps the original page and re-enables navigation", a
   } finally {lookup.mock.restore(); view.dispose(); window.close(); h.close();}
 });
 
-test("browsing before the catalog is ready loads saved entries as soon as it arrives", async () => {
+test("browsing before the catalog is ready loads saved entries and returns to the writer on selection", async () => {
   const h = await applicationFixture(), job = deferred<ReturnType<typeof catalog>>();
   await h.records.settle(h.records.create({type: "collection-owned-entry", path: "journal/earlier.md", frontmatter: {created: "2025-01-02T09:00:00+00:00"}, body: "Earlier saved entry"}));
   const describe = mock.method(h.records, "describe", () => job.promise);
   const window = new JSDOM(html, {url: "https://journal.fixture/"}).window, document = window.document;
   const dialog = document.querySelector<HTMLDialogElement>("#entries")!;
   dialog.showModal = () => dialog.setAttribute("open", ""); dialog.close = () => dialog.removeAttribute("open");
-  const view = mountJournal(document, new JournalDrafts(memoryStorage()), h.mdbase);
+  const drafts = new JournalDrafts(memoryStorage(), undefined, operation => Promise.resolve().then(operation));
+  const view = await drafts.mutate(() => mountJournal(document, drafts, h.mdbase));
   try {
     document.getElementById("browse-button")!.click();
     assert.match(document.getElementById("entries-status")!.textContent!, /Loading entries/);
@@ -137,6 +163,12 @@ test("browsing before the catalog is ready loads saved entries as soon as it arr
     for (let i = 0; i < 100 && !document.querySelector("#entry-list button"); i++) await new Promise(resolve => setTimeout(resolve, 5));
     assert.equal(document.querySelectorAll("#entry-list button").length, 1);
     assert.equal(document.getElementById("entries-status")!.textContent, "");
+    const button = document.querySelector<HTMLButtonElement>("#entry-list button")!;
+    button.focus(); button.click();
+    for (let i = 0; i < 100 && view.currentDraft().body !== "Earlier saved entry"; i++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(view.currentDraft().body, "Earlier saved entry");
+    assert.equal(dialog.open, false);
+    assert.equal(document.activeElement, document.getElementById("page"));
   } finally {job.resolve(catalog()); describe.mock.restore(); view.dispose(); window.close(); h.close();}
 });
 
