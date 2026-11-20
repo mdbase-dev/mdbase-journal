@@ -16,6 +16,19 @@ test("missing or ambiguous contract implementations never pick the starter name"
   assert.throws(() => journalEntryTypes(value), /ambiguous/);
   value.types = []; assert.throws(() => journalEntryTypes(value), /no Journal entry type/);
 });
+test("saved entries span bounded SDK pages and sort newest first across them", async () => {
+  const h = await applicationFixture(), data = new JournalData(h.connection, new JournalDrafts(memoryStorage()));
+  const types = journalEntryTypes(catalog()), query = mock.method(h.records, "query");
+  try {
+    const ids = Array.from({length: 1001}, (_, index) => h.replica.seed({
+      path: `journal/${String(index).padStart(4, "0")}.md`, types: [types[0]!.name],
+      frontmatter: {created: new Date(Date.UTC(2026, 0, 1) + index).toISOString()},
+    }).id);
+    const entries = await data.entries(types);
+    assert.deepEqual(entries.map(entry => entry.id), ids.reverse());
+    assert.ok(query.mock.calls.some(call => call.arguments[0].cursor), "must follow an SDK continuation");
+  } finally {query.mock.restore(); data.release(); await h.fixture.close();}
+});
 test("real SDK create pins original IDs, then edits through the same record lease", async () => {
   const h = await applicationFixture();
   const drafts = new JournalDrafts(memoryStorage()), draft = drafts.create(h.connection.id);

@@ -75,7 +75,7 @@ export class JournalData {
   async entries(types: JournalEntryType[]): Promise<JournalEntry[]> {
     this.ensure();
     const entries: JournalEntry[] = [];
-    for await (const page of this.connection.records.pages({types: types.map(type => type.name)}, {signal: this.caller.signal})) {
+    for await (const page of this.connection.records.pages({types: types.map(type => type.name), limit: 500}, {signal: this.caller.signal})) {
       this.ensure();
       if (!page.complete) throw new Error("Saved entries are still loading. Notes on this device are still available.");
       for (const record of page.records) {
