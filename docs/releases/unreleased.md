@@ -1,5 +1,7 @@
 # Unreleased
 
+- Screen reader users can jump to the current journal date as the page’s main heading. The date still opens the entry picker.
+
 - Local builds and development startup verify the SDK actually pinned by the app, using the same production metadata as publication.
 
 - Keep newer journal text when a delayed change from another tab arrives while you type.

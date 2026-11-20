@@ -38,6 +38,18 @@ test("actual public singleton is lazy not_started in a controlled browser host, 
     h.window.close();
   }
 });
+test("the ready writing page has one level-one heading naming the current journal date", async () => {
+  const h = dom(), f = await applicationFixture();
+  const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.mdbase);
+  try {
+    const headings = h.window.document.querySelectorAll("h1");
+    assert.equal(headings.length, 1);
+    const date = h.window.document.querySelector("#browse-button")!.textContent!.trim();
+    assert.ok(date);
+    assert.equal(headings[0]!.textContent!.trim(), date);
+    assert.equal(headings[0]!.closest("dialog, [hidden], [aria-hidden=true]"), null);
+  } finally {view.dispose(); f.close(); h.window.close();}
+});
 test("shared collection panel has one Add a collection entry, not the stale private link", async () => {
   const h = dom(), f = await applicationFixture();
   const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.mdbase);
