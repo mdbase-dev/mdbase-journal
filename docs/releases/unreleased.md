@@ -1,5 +1,7 @@
 # Unreleased
 
+- The entries sheet now lists saved entries in large collections instead of showing only notes on this device.
+
 - Screen reader users can jump to the current journal date as the page’s main heading. The date still opens the entry picker.
 
 - Local builds and development startup verify the SDK actually pinned by the app, using the same production metadata as publication.
