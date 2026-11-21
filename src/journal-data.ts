@@ -175,7 +175,7 @@ export class JournalData {
       draft = await this.drafts.mutate(() => this.drafts.patch(id, {recordId: attempt.recordId, savedBody: record.state.state === "confirmed" ? attempt.body : null}));
     }
     // An unconfirmed write from an earlier visit is in the SDK write ledger; the record stays editable.
-    const lease = await this.connection.records.records.open(draft.recordId!, {signal: this.caller.signal, autosave: {idleMs: 1200}});
+    const lease = await this.connection.records.records.open(draft.recordId!, {signal: this.caller.signal, autosave: {idleMs: 1200}, requireLive: true});
     try {
       this.ensure(draft);
       const snapshot = lease.session.getSnapshot();
@@ -258,7 +258,7 @@ export class JournalData {
     const owned = this.leases.get(id);
     // A released conflict can still be retained by this SDK client. Reopen it
     // only for this explicit discard, without seeding an autosaving draft.
-    const lease = owned ?? await this.connection.records.records.open(original.recordId, {signal: this.caller.signal, autosave: {idleMs: 1200}});
+    const lease = owned ?? await this.connection.records.records.open(original.recordId, {signal: this.caller.signal, autosave: {idleMs: 1200}, requireLive: true});
     try {
       this.ensure(original, true);
       return await this.drafts.mutate(() => {
