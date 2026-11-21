@@ -154,19 +154,79 @@ test("pending and other-collection drafts are not mistaken for deleted saved ent
   } finally {find.mock.restore(); data.release(); await h.fixture.close();}
 });
 
-test("a live record lease preserves unsent text when its original is deleted", async () => {
+test("recovery and normal opens use delete-wins while live editing and ordinary deletion still work", async () => {
   const h = await applicationFixture(), drafts = new JournalDrafts(memoryStorage());
   const draft = await savedDraft(h, drafts), data = new JournalData(h.connection, drafts);
+  const records = h.records.records, open = mock.fn(records.open);
+  Object.defineProperty(h.records, "records", {value: {...records, open}});
+  drafts.patch(draft.id, {body: "Conflicting local text", reviewRequired: true});
   try {
+    const saved = await data.useSavedVersion(draft.id);
+    assert.equal(saved.body, draft.savedBody);
+    assert.equal(saved.reviewRequired, false);
     await data.open(draft.id);
+    assert.deepEqual(open.mock.calls.map(({arguments: [id, options]}) => [id, options?.requireLive]),
+      [[draft.recordId, true], [draft.recordId, true]]);
+    await data.setBody(draft.id, "Live edit");
+    await data.flush(draft.id);
+    assert.equal((await h.records.get(draft.recordId!, {include: {body: true}})).body, "Live edit");
     await data.setBody(draft.id, "Unsent local text");
     await h.records.settle(h.records.delete(draft.recordId!));
     await until(() => !!drafts.get(draft.id)?.deletedElsewhere);
     assert.equal(drafts.get(draft.id)?.body, "Unsent local text");
-    assert.equal(drafts.get(draft.id)?.savedBody, "Saved entry");
+    assert.equal(drafts.get(draft.id)?.savedBody, "Live edit");
+    assert.equal(await h.records.find(draft.recordId!), null);
     await assert.rejects(data.flush(draft.id), /deleted elsewhere/i);
     await assert.rejects(data.useSavedVersion(draft.id), /deleted elsewhere/i);
-  } finally {data.release(); await h.fixture.close();}
+  } finally {Object.defineProperty(h.records, "records", {value: records}); data.release(); await h.fixture.close();}
+});
+
+test("a queued autosave rejected as deleted offers to copy the unsaved text without recreating the entry", {timeout: 10_000}, async () => {
+  const h = await applicationFixture(), drafts = new JournalDrafts(memoryStorage());
+  const draft = await savedDraft(h, drafts), recordId = draft.recordId!;
+  const window = windowForJournal(), view = mountJournal(window.document, drafts, h.mdbase);
+  const page = window.document.querySelector<HTMLTextAreaElement>("#page")!;
+  const status = window.document.getElementById("status")!, recovery = window.document.getElementById("draft-conflict")!;
+  const pending = deferred<string>(), copied = deferred<string>();
+  const awaitReceipt = h.records.awaitReceipt.bind(h.records);
+  const receipt = mock.method(h.records, "awaitReceipt", (...[mutationId, options]: Parameters<typeof awaitReceipt>) => {
+    pending.resolve(mutationId);
+    return awaitReceipt(mutationId, options);
+  });
+  const create = mock.method(h.records, "create"), update = mock.method(h.records, "update");
+  Object.defineProperty(window.navigator, "clipboard", {value: {writeText: async (text: string) => copied.resolve(text)}});
+  try {
+    await until(() => status.textContent === "Saved");
+    h.replica.setOnline(false);
+    const unsaved = `${draft.body}\nWritten offline`;
+    page.value = unsaved;
+    page.dispatchEvent(new window.Event("input"));
+    const mutationId = await pending.promise;
+    assert.equal((await h.records.receipt(mutationId)).state, "pending");
+    assert.equal(update.mock.calls[0]!.arguments[1]?.requireLive, true);
+    assert.equal(recovery.hidden, true);
+
+    h.replica.reject(mutationId, mdbaseError("not_found", "Record was deleted at head", "deleted").toProblem());
+    h.replica.deleteElsewhere(recordId);
+    assert.equal(await h.records.find(recordId), null);
+    h.replica.setOnline(true);
+    h.replica.confirmAll();
+    const rejected = await h.records.receipt(mutationId);
+    assert.equal(rejected.state, "rejected");
+    assert.equal(rejected.problem?.code, "not_found");
+    assert.equal(rejected.problem?.reason, "deleted");
+    await until(() => !recovery.hidden && !!recovery.textContent?.includes("deleted elsewhere"));
+    assert.equal(view.currentDraft().id, draft.id);
+    assert.equal(drafts.get(draft.id)?.savedBody, draft.body);
+    assert.equal(drafts.get(draft.id)?.body, unsaved);
+    assert.equal(page.value, unsaved);
+    assert.equal(window.document.getElementById("use-saved-version")!.hidden, true);
+    window.document.getElementById("copy-conflicting-text")!.click();
+    assert.equal(await copied.promise, unsaved);
+    assert.equal(await h.records.find(recordId), null);
+    assert.equal(update.mock.callCount(), 1);
+    assert.equal(create.mock.callCount(), 0);
+  } finally {receipt.mock.restore(); create.mock.restore(); update.mock.restore(); view.dispose(); window.close(); await h.fixture.close();}
 });
 
 test("a restored original record can be opened again without replacing retained local text", async () => {
