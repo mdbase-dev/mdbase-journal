@@ -212,7 +212,7 @@ test("existing entries save without choosing a type in a collection with several
     const page = window.document.getElementById("page") as HTMLTextAreaElement;
     assert.equal(page.value, "Existing page");
     assert.equal((window.document.getElementById("entry-type") as HTMLSelectElement).value, "");
-    lease = await f.records.records.open(view.currentDraft().recordId!, {autosave: {idleMs: 1200}});
+    lease = await f.records.records.open(view.currentDraft().recordId!, {autosave: {idleMs: 1200}, requireLive: true});
     page.value = "Existing page edited"; page.dispatchEvent(new window.Event("input"));
     await until(() => lease!.session.getSnapshot().body === page.value);
     assert.equal((await lease.session.flush()).ok, true);

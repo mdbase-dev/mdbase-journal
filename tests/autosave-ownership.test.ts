@@ -68,14 +68,14 @@ test("idle status sweep never autosaves a peer prefix; owner saves the complete 
     const blank = b.view.currentDraft().id;
     a.write(seed); await until(() => a.window.document.getElementById("status")!.textContent === "Saved");
     const id = a.view.currentDraft().id, recordId = a.drafts.get(id)!.recordId!;
-    lease = await f.records.records.open(recordId, {autosave: {idleMs: 1200}});
+    lease = await f.records.records.open(recordId, {autosave: {idleMs: 1200}, requireLive: true});
     a.write(prefix); await until(() => lease!.session.getSnapshot().body === prefix);
     t.status(); await new Promise<void>(resolve => setImmediate(resolve));
     assert.equal(t.peerRequests.length, 0, "idle tab cannot acquire an autosaving SDK session");
     a.write(full); await until(() => lease!.session.getSnapshot().body === full);
     // A passive clean peer session flushes first, modeling the RCA's timer
     // ordering. Journal must not have seeded it with the unfinished prefix.
-    const passive = await peer.records.open(recordId, {autosave: {idleMs: 1200}});
+    const passive = await peer.records.open(recordId, {autosave: {idleMs: 1200}, requireLive: true});
     try {assert.equal((await passive.session.flush()).ok, true);} finally {passive.release();}
     assert.equal((await lease.session.flush()).ok, true);
     await until(() => a.window.document.getElementById("status")!.textContent === "Saved");
@@ -113,7 +113,7 @@ test("closing the owner hands its latest unfinished draft to an idle tab", async
     fresh = await f.replica.client();
     reloaded = await t.tab(t.application(fresh));
     await until(() => reloaded!.window.document.getElementById("status")!.textContent === "Saved");
-    const resumed = await fresh.records.open(recordId, {autosave: {idleMs: 1200}});
+    const resumed = await fresh.records.open(recordId, {autosave: {idleMs: 1200}, requireLive: true});
     try {
       reloaded.write(full + " Continued after reload.");
       await until(() => resumed.session.getSnapshot().body === reloaded!.page.value);
@@ -130,7 +130,7 @@ test("startup restoration follows peer text without creating another writer", as
   try {
     a.write(seed); await until(() => a.window.document.getElementById("status")!.textContent === "Saved");
     const id = a.view.currentDraft().id, recordId = a.drafts.get(id)!.recordId!;
-    lease = await f.records.records.open(recordId, {autosave: {idleMs: 1200}});
+    lease = await f.records.records.open(recordId, {autosave: {idleMs: 1200}, requireLive: true});
     a.write(prefix); await until(() => lease!.session.getSnapshot().body === prefix);
     restored = await t.tab(t.peerApp);
     await new Promise<void>(resolve => setImmediate(resolve));
@@ -150,7 +150,7 @@ test("the owner follows peer edits to its previous page without a second session
   try {
     a.write(seed); await until(() => a.window.document.getElementById("status")!.textContent === "Saved");
     const id = a.view.currentDraft().id, recordId = a.drafts.get(id)!.recordId!;
-    lease = await f.records.records.open(recordId, {autosave: {idleMs: 1200}});
+    lease = await f.records.records.open(recordId, {autosave: {idleMs: 1200}, requireLive: true});
     a.write(prefix); await until(() => lease!.session.getSnapshot().body === prefix);
     follower = await t.tab(t.peerApp);
     await new Promise<void>(resolve => setImmediate(resolve));
@@ -187,7 +187,7 @@ test("an independent editor still conflicts and local text is discarded only by 
   try {
     a.write(seed); await until(() => a.window.document.getElementById("status")!.textContent === "Saved");
     const id = a.view.currentDraft().id, recordId = a.drafts.get(id)!.recordId!;
-    active = await f.records.records.open(recordId, {autosave: {idleMs: 1200}});
+    active = await f.records.records.open(recordId, {autosave: {idleMs: 1200}, requireLive: true});
     editor = await peer.records.open(recordId, {autosave: false});
     a.write(full); await until(() => active!.session.getSnapshot().body === full);
     editor.session.setBody("Independent edit");
@@ -213,7 +213,7 @@ test("a delayed peer edit of a hidden page cannot borrow a later outside revisio
   try {
     a.write(seed); await until(() => a.window.document.getElementById("status")!.textContent === "Saved");
     const id = a.view.currentDraft().id, recordId = a.drafts.get(id)!.recordId!;
-    active = await f.records.records.open(recordId, {autosave: {idleMs: 1200}});
+    active = await f.records.records.open(recordId, {autosave: {idleMs: 1200}, requireLive: true});
     follower = await t.tab(t.peerApp);
     const previous = JSON.stringify(a.drafts.get(id));
     follower.write(full); await until(() => follower!.drafts.get(id)?.body === full);
@@ -239,7 +239,7 @@ test("queued input on the current page cannot skip the previous page's last peer
   try {
     a.write(seed); await until(() => a.window.document.getElementById("status")!.textContent === "Saved");
     const id = a.view.currentDraft().id, recordId = a.drafts.get(id)!.recordId!;
-    active = await f.records.records.open(recordId, {autosave: {idleMs: 1200}});
+    active = await f.records.records.open(recordId, {autosave: {idleMs: 1200}, requireLive: true});
     a.write(prefix); await until(() => active!.session.getSnapshot().body === prefix);
     follower = await t.tab(t.peerApp);
     a.view.newPage(); await until(() => a.view.currentDraft().id !== id);
@@ -260,7 +260,7 @@ for (const hideOwner of [true, false]) test(`a conflict is recoverable from anot
   try {
     a.write(seed); await until(() => a.window.document.getElementById("status")!.textContent === "Saved");
     const id = a.view.currentDraft().id, recordId = a.drafts.get(id)!.recordId!;
-    active = await f.records.records.open(recordId, {autosave: {idleMs: 1200}});
+    active = await f.records.records.open(recordId, {autosave: {idleMs: 1200}, requireLive: true});
     a.write(full); await until(() => active!.session.getSnapshot().body === full);
     follower = await t.tab(t.peerApp);
     if (hideOwner) {a.view.newPage(); await until(() => a.view.currentDraft().id !== id);}
@@ -276,7 +276,7 @@ for (const hideOwner of [true, false]) test(`a conflict is recoverable from anot
     await until(() => follower!.window.document.getElementById("status")!.textContent === "Saved");
     a.storage(id);
     assert.equal(a.drafts.get(id)?.reviewRequired, false);
-    const resumed = await peer.records.open(recordId, {autosave: {idleMs: 1200}});
+    const resumed = await peer.records.open(recordId, {autosave: {idleMs: 1200}, requireLive: true});
     try {
       follower.write("Independent edit continued");
       await until(() => resumed.session.getSnapshot().body === follower!.page.value);

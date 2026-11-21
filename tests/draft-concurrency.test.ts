@@ -84,7 +84,7 @@ test("a single-tab save echo arriving ahead of queued input is not an outside ed
   try {
     h.write("Seed"); await until(() => h.window.document.getElementById("status")!.textContent === "Saved");
     const id = view.currentDraft().id, recordId = drafts.get(id)!.recordId!;
-    lease = await f.records.records.open(recordId, {autosave: {idleMs: 1200}});
+    lease = await f.records.records.open(recordId, {autosave: {idleMs: 1200}, requireLive: true});
     h.write("Seed and my edit"); await until(() => lease!.session.getSnapshot().body === "Seed and my edit");
     pause = gate.promise; h.write("Seed and my edit plus more");
     assert.equal((await lease.session.flush()).ok, true);
