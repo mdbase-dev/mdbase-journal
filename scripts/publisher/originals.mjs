@@ -77,6 +77,25 @@ export async function directOriginal(root,pkg,lock,name,{registry,fetchImpl}) {
  const original=await publicBytes(entry.resolved,fetchImpl);
  assert.equal(entry.integrity,'sha512-'+hash(original,'sha512'),'registry original does not match the lock: '+name);return {original};
 }
+// The SDK's offline-shell build writes mdbase-shell-register.js from a template
+// literal. Derive the exact expected bytes from that authenticated generator as
+// data (never executed) for Journal's root base. SDK 0.2.9 (Connect b5a8ee62) moved
+// the template into offlineShellRegistration(worker, scope); earlier SDKs wrote it
+// inline. Exactly one known generator must be present, with no other interpolation.
+const shellRegistrationGenerators=[
+ {source:/^function offlineShellRegistration\(worker, scope\) \{\n    return `([^`]*)`;\n\}$/gm,values:[['${JSON.stringify(worker)}','"/mdbase-shell-sw.js"'],['${JSON.stringify(scope)}','"/"']]},
+ {source:/^ *await writeFile\(join\(directory, registrationFile\), `([^`]*)`\);$/gm,values:[['${JSON.stringify(base + workerFile)}','"/mdbase-shell-sw.js"'],['${JSON.stringify(base)}','"/"']]},
+];
+export function offlineShellRegistration(build) {
+ const text=Buffer.from(build).toString('utf8');
+ const found=shellRegistrationGenerators.flatMap(({source,values})=>[...text.matchAll(source)].map(([,template])=>({template,values})));
+ assert.equal(found.length,1,'exactly one known SDK offline-shell registration generator required');
+ let {template,values}=found[0];
+ for(const [expression,value] of values) {assert(template.includes(expression),'SDK offline-shell registration interpolation missing');template=template.split(expression).join(value);}
+ template=template.replaceAll('\\n','\n');
+ assert(!template.includes('${')&&!template.includes('\\'),'unknown SDK offline-shell registration interpolation or escape');
+ return template;
+}
 export async function loadOriginals({target,repoRoot,hashes,installed=false,fetchImpl=fetch,authenticate=authenticateProduction,stage=stagingArchive}) {
  assert(['production','staging'].includes(target));protectedHashes(hashes);
  const {pin,bytes:production,spec}=await productionPin(repoRoot),pkg=await json(join(repoRoot,'package.json'));
@@ -108,7 +127,7 @@ export async function loadOriginals({target,repoRoot,hashes,installed=false,fetc
  const assetPins=JSON.parse(member(bytes,'dist/application/asset-pins.json')),nativeAssets={};assert.deepEqual(assetPins.runtime,provenance.runtime);
  for(const [name,pin] of [['runtime.wasm',assetPins.runtime],['sqlite3.wasm',assetPins.sqlite],['sqlite3.js',assetPins.sqlite.initializer]]) {const original=member(bytes,'dist/native/'+name);assert.equal(pin.sha256,hash(original));assert.equal(pin.bytes,original.length);nativeAssets[name]={sha256:hash(original),bytes:original.length};}
  const runtime=member(bytes,'dist/offline-shell-worker.js').toString().replace(/\n\/\/# sourceMappingURL=.*$/m,'');
- const registration='if ("serviceWorker" in navigator) navigator.serviceWorker.register("/mdbase-shell-sw.js", {scope:"/",type:"module"}).catch(() => console.warn("Offline app support could not start."));\n';
+ const registration=offlineShellRegistration(member(bytes,'dist/offline-shell-build.js'));
  const offlineShell={runtime:{bytes:Buffer.byteLength(runtime),sha256:hash(runtime)},registration:{bytes:Buffer.byteLength(registration),sha256:hash(registration)}};
  if(installed)await compareInstalled(repoRoot,archives);
  return {environment:target,sdkSource:pin.sourceCommit,release,trust,nativeAssets,offlineShell,archives,authentication,trustModuleSha256:hash(module),lockSha256:hash(lockBytes),protectedHashes:hashes,stagingUrl,production:{path:spec.slice(5),sri:pin.sri,version:pin.version},appOrigin:target==='production'?'https://journal.mdbase.dev':'https://staging.mdbase-journal.pages.dev'};
