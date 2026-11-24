@@ -3,7 +3,7 @@ import {cp,mkdir,mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {it} from 'node:test';
-import {loadOriginals,productionPin,protectedHashes} from './originals.mjs';
+import {loadOriginals,offlineShellRegistration,productionPin,protectedHashes} from './originals.mjs';
 import {prepareInstall} from './install-inputs.mjs';
 const root=new URL('../../',import.meta.url).pathname;
 const policy=JSON.parse(await readFile(join(root,'config/sdk-publication.json'),'utf8')).sdkPublication;
@@ -54,4 +54,12 @@ it('accepts an exact published UI pin only when the registry tarball matches the
   await assert.rejects(compareInstalled(temp,archives),/ALL installed original/);
   await assert.rejects(compareInstalled(temp,{ui:{name,resolved,sri}}),/registry original members required/);
  }finally{await rm(temp,{recursive:true,force:true});}
+});
+it('derives the exact offline-shell registration bytes from either known SDK generator and refuses anything else',()=>{
+ const legacy='const base = "/";\n        await writeFile(join(directory, registrationFile), `if ("serviceWorker" in navigator) navigator.serviceWorker.register(${JSON.stringify(base + workerFile)}, {scope:${JSON.stringify(base)},type:"module"}).catch(() => console.warn("Offline app support could not start."));\\n`);\n';
+ assert.equal(offlineShellRegistration(Buffer.from(legacy)),'if ("serviceWorker" in navigator) navigator.serviceWorker.register("/mdbase-shell-sw.js", {scope:"/",type:"module"}).catch(() => console.warn("Offline app support could not start."));\n');
+ const activating='/** doc */\nfunction offlineShellRegistration(worker, scope) {\n    return `if ("serviceWorker" in navigator) {\n  navigator.serviceWorker.register(${JSON.stringify(worker)}, {scope:${JSON.stringify(scope)},type:"module"}).then(r => r.waiting?.postMessage({type:"mdbase-shell:activate"}));\n}\n`;\n}\n';
+ assert.equal(offlineShellRegistration(Buffer.from(activating)),'if ("serviceWorker" in navigator) {\n  navigator.serviceWorker.register("/mdbase-shell-sw.js", {scope:"/",type:"module"}).then(r => r.waiting?.postMessage({type:"mdbase-shell:activate"}));\n}\n');
+ for(const refused of ['',legacy+activating,activating.replace('${JSON.stringify(scope)}','${scope}'),activating.replace('${JSON.stringify(worker)}','"/sw.js"')])
+  assert.throws(()=>offlineShellRegistration(Buffer.from(refused)),/registration/);
 });
