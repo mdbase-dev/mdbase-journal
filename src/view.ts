@@ -113,14 +113,39 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     });
   }
   function clearUndo(): void {undoId = null; if (undoTimer !== null) clearTimeout(undoTimer); undoTimer = null;}
+  /** Grow the page to its text without moving the reader. Measuring through
+   * `auto` briefly shortens the document, and the browser clamps the scroll
+   * position to it; on a phone that drops the caret behind the keyboard. */
+  function fit(): void {
+    const view = document.defaultView, y = view?.scrollY ?? 0;
+    page.style.height = "auto";
+    page.style.height = `${Math.max(240, page.scrollHeight)}px`;
+    if (view && view.scrollY !== y) view.scrollTo(view.scrollX, y);
+  }
+  /** Keep a collapsed caret clear of the header, the footer and an on-screen
+   * keyboard. The page never scrolls itself (it grows), so the document does. */
+  function revealCaret(): void {
+    const view = document.defaultView, viewport = view?.visualViewport;
+    if (!view || !viewport || document.activeElement !== page || page.selectionStart !== page.selectionEnd) return;
+    const style = view.getComputedStyle(page), mirror = document.createElement("div"), caret = document.createElement("span");
+    for (const name of ["boxSizing", "width", "paddingTop", "paddingLeft", "paddingRight", "borderTopWidth", "borderLeftWidth", "borderRightWidth", "fontFamily", "fontSize", "fontWeight", "fontStyle", "fontVariationSettings", "fontOpticalSizing", "letterSpacing", "wordSpacing", "lineHeight", "textIndent", "textTransform", "tabSize"] as const) mirror.style[name] = style[name];
+    Object.assign(mirror.style, {position: "absolute", top: "0", left: "0", visibility: "hidden", borderStyle: "solid", borderColor: "transparent", whiteSpace: "pre-wrap", overflowWrap: "break-word"});
+    mirror.textContent = page.value.slice(0, page.selectionEnd);
+    caret.textContent = "​"; mirror.append(caret); document.body.append(mirror);
+    const caretTop = page.getBoundingClientRect().top + caret.offsetTop, line = parseFloat(style.lineHeight) || caret.offsetHeight;
+    mirror.remove();
+    const top = Math.max(viewport.offsetTop, element("menu-button").closest("header")!.getBoundingClientRect().bottom);
+    const bottom = Math.min(viewport.offsetTop + viewport.height, element("status-button").closest("footer")!.getBoundingClientRect().top) - 8;
+    if (caretTop + line > bottom) view.scrollBy(0, caretTop + line - bottom);
+    else if (caretTop < top) view.scrollBy(0, caretTop - top);
+  }
   let renderedDraftId = current.id;
   function renderPage(): void {
     if (renderedDraftId !== current.id) conflicted = false;
     renderedDraftId = current.id;
     displayedRecordRevision = data?.snapshot(current.id)?.record.revision ?? null;
     page.value = current.body;
-    page.style.height = "auto";
-    page.style.height = `${Math.max(240, page.scrollHeight)}px`;
+    fit();
     document.body.classList.remove("quiet");
     element("when").textContent = new Date(current.createdMs).toLocaleString(undefined, {weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit"});
   }
@@ -486,9 +511,13 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       conflicted = error instanceof DraftConflictError;
       problem = error instanceof Error ? error.message : "Keep this page open: Journal cannot preserve its text on this device.";
     }).finally(() => {pendingInputs--; render();});
-    page.style.height = "auto"; page.style.height = `${Math.max(240, page.scrollHeight)}px`;
+    fit();
     document.body.classList.toggle("quiet", !!body.trim()); render();
+    revealCaret();
   });
+  // The keyboard opening shrinks the visual viewport after focus moves to the page.
+  const viewport = document.defaultView?.visualViewport;
+  if (viewport) listen(viewport, "resize", () => document.defaultView?.requestAnimationFrame(revealCaret));
   listen(document, "keydown", event => {const key = event as KeyboardEvent; if ((key.ctrlKey || key.metaKey) && key.key === "Enter" && key.target === page && !document.querySelector("dialog[open]")) {key.preventDefault(); newPage();}});
   listen(element("new-button"), "click", newPage);
   listen(element("undo-button"), "click", undoNewPage);
