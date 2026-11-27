@@ -38,7 +38,7 @@ test("consumer build retains original same-artifact Worker/native bytes and no p
     // The fixture symlinks most dependencies to this checkout, so esbuild reports
     // them by real path (../node_modules/...); they are the same locked packages.
     const inputs=Object.keys(result.application.inputs).map(path=>path.replace(/^\.\.\/(?=node_modules\/)/,"")),bundled=inputs.filter(path=>path.startsWith("node_modules/"));
-    assert.deepEqual(inputs.filter(path=>!bundled.includes(path)).sort(),["public/.well-known/mdbase-app.json","src/application.ts","src/connection-notice.ts","src/draft-opens.ts","src/drafts.ts","src/grant-callback.ts","src/journal-data.ts","src/main.ts","src/returning-notice.ts","src/view.ts"]);
+    assert.deepEqual(inputs.filter(path=>!bundled.includes(path)).sort(),["public/.well-known/mdbase-app.json","src/application.ts","src/connection-notice.ts","src/draft-opens.ts","src/drafts.ts","src/grant-callback.ts","src/journal-data.ts","src/main.ts","src/returning-notice.ts","src/setup-conflicts.ts","src/view.ts"]);
     // Bundled packages follow the published pins: each is a locked runtime (non-dev)
     // package, and the bundle carries the SDK, the shared collection UI and React.
     const lock=JSON.parse(await readFile(resolve(root,"package-lock.json"),"utf8"));

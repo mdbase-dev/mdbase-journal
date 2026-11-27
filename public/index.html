@@ -52,6 +52,17 @@
     <p id="menu-connection"></p>
     <div id="collection-row" class="row">
       <div id="collection-panel"></div>
+      <section id="setup-conflict-recovery" class="setup-recovery" hidden aria-labelledby="setup-conflict-title" aria-live="polite">
+        <h3 id="setup-conflict-title">Resolve setup conflict</h3>
+        <p id="setup-conflict-guidance"></p>
+        <div class="setup-recovery-actions">
+          <button id="restore-setup-definition" class="primary" type="button" hidden>Restore Journal’s version (keep backup)</button>
+          <button id="switch-setup-collection" type="button" hidden>Switch collection</button>
+          <button id="cancel-setup-conflict" type="button">Cancel</button>
+        </div>
+        <p id="setup-conflict-feedback" role="status" hidden></p>
+      </section>
+      <p id="setup-conflict-notice" class="setup-recovery-notice" role="status" hidden></p>
       <p>Switching starts a new page. Existing notes stay with their original collection.</p>
     </div>
     <div class="row">

@@ -5,6 +5,13 @@ import {DraftConflictError, DraftPersistenceError, draftRevision, JournalDrafts,
 import {DELETED_ENTRY_NOTICE, JournalCatalogError, JournalData, type JournalEntry, type JournalEntryType} from "./journal-data.js";
 import {DraftOpens} from "./draft-opens.js";
 import {connectionNotice, connectionNoticeLabels} from "./connection-notice.js";
+import {
+  inspectSetupConflicts,
+  restoreConfirmationText,
+  restoreSetupDefinitions,
+  setupConflictGuidanceText,
+  type SetupConflictGuidance,
+} from "./setup-conflicts.js";
 export interface JournalView {dispose(): void; currentDraft(): JournalDraft; newPage(): void; undoNewPage(): void}
 const app = {name: "Journal"};
 interface TypesProblem {readonly title: string; readonly detail: string}
@@ -45,6 +52,14 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   let types: JournalEntryType[] = [];
   let type: JournalEntryType | null = null;
   let problem: string | null = null;
+  let setupConflict: SetupConflictGuidance | null = null;
+  let setupConflictCollectionId: string | null = null;
+  let setupConflictChecking = false;
+  let setupConflictController: AbortController | null = null;
+  let restoringSetup = false;
+  let switchingSetupCollection = false;
+  let setupConflictFeedback: string | null = null;
+  let setupConflictNotice: string | null = null;
   let disposed = false;
   let undoId: string | null = null;
   let undoTimer: ReturnType<typeof setTimeout> | null = null;
@@ -207,13 +222,13 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
         record.state === "saved_on_device" ? "Saved on this device; waiting for sync" : "On this device";
       tone = record.state === "saved_on_device" ? "notice" : "routine";
     }
-    if (!message) tone = phase?.kind === "problem" ? "alert" : phase?.kind === "ready" && data ? "routine" : "notice";
+    if (!message) tone = phase?.kind === "problem" || phase?.kind === "needs_setup" && !!setupConflict ? "alert" : phase?.kind === "ready" && data ? "routine" : "notice";
     if (!message) message = !phase ? "On this device. Sign-in is unavailable in this build." :
       phase.kind === "unavailable" ? `On this device. ${phase.problem.title}. ${phase.problem.message}` :
       phase.kind === "authorizing" ? "Waiting for approval in the mdbase window…" :
       phase.kind === "opening" ? `Opening ${name}. Your text stays on this device.` :
       phase.kind === "needs_approval" ? "Approve the collection, or choose another. Your text stays on this device." :
-      phase.kind === "needs_setup" ? `Set up Journal in ${name}` :
+      phase.kind === "needs_setup" ? (setupConflict ? `Resolve Journal setup conflict in ${name}` : `Set up Journal in ${name}`) :
       phase.kind === "problem" ? `${phase.problem.title}. Your text stays on this device.` :
       phase.kind === "choosing" ? "Choose a collection. Your text stays on this device." :
       data ? "On this device" : "On this device. Sign in to save.";
@@ -268,6 +283,26 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     document.body.classList.toggle("retry", retryCurrent);
     element("menu-connection").textContent = openId && catalogProblem ? `${catalogProblem.title}. ${catalogProblem.detail}` :
       openId ? `Notes save to ${name}.` : "Notes stay on this device until a collection is open.";
+    const recovery = element("setup-conflict-recovery");
+    recovery.hidden = !setupConflict;
+    if (setupConflict) {
+      element("setup-conflict-guidance").textContent = setupConflictGuidanceText(setupConflict);
+      const restoreButton = element<HTMLButtonElement>("restore-setup-definition");
+      restoreButton.hidden = !setupConflict.canRestoreWithBackup;
+      restoreButton.textContent = restoringSetup ? "Restoring…" : "Restore Journal’s version (keep backup)";
+      restoreButton.disabled = restoringSetup || switchingSetupCollection;
+      const switchButton = element<HTMLButtonElement>("switch-setup-collection");
+      switchButton.hidden = state?.signIn?.state !== "paired";
+      switchButton.textContent = switchingSetupCollection ? "Switching…" : "Switch collection";
+      switchButton.disabled = restoringSetup || switchingSetupCollection;
+      element<HTMLButtonElement>("cancel-setup-conflict").disabled = restoringSetup || switchingSetupCollection;
+      const feedback = element("setup-conflict-feedback");
+      feedback.hidden = !setupConflictFeedback;
+      feedback.textContent = setupConflictFeedback ?? "";
+    }
+    const noticeElement = element("setup-conflict-notice");
+    noticeElement.hidden = !setupConflictNotice || !!setupConflict;
+    noticeElement.textContent = setupConflictNotice ?? "";
     document.body.classList.toggle("undo", !!undoId);
     element("keys").textContent = /Mac|iPhone|iPad/.test(document.defaultView?.navigator.platform ?? "") ? "⌘↩" : "Ctrl+↩";
     const words = segmenter ? [...segmenter.segment(current.body)].filter(item => item.isWordLike).length : current.body.match(/\S+/g)?.length ?? 0;
@@ -410,11 +445,47 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     } catch {problem = "Keep this page open: Journal cannot read its drafts on this device.";}
     render();
   }
+  function inspectSetupPlan(collectionId: string): void {
+    if (!mdbase || disposed) return;
+    setupConflictController?.abort();
+    const controller = new (document.defaultView?.AbortController ?? AbortController)();
+    setupConflictController = controller;
+    void mdbase.setup.plan({signal: controller.signal}).then(plan => {
+      if (disposed || controller.signal.aborted || setupConflictController !== controller) return;
+      const currentPhase = snapshot()?.phase;
+      if (currentPhase?.kind !== "needs_setup" || currentPhase.collectionId !== collectionId) return;
+      setupConflict = inspectSetupConflicts(plan, collectionId, mdbase.connection(collectionId));
+      render();
+    }, () => {
+      if (disposed || controller.signal.aborted || setupConflictController !== controller) return;
+      setupConflict = null;
+      render();
+    });
+  }
   function changed(): void {
     if (!mdbase || disposed) return;
-    const selectedId = snapshot()?.selectedCollectionId ?? null;
+    const currentSnapshot = snapshot();
+    const selectedId = currentSnapshot?.selectedCollectionId ?? null;
     const selectionChanged = selectedId !== observedCollectionId;
     observedCollectionId = selectedId;
+    if (selectionChanged) setupConflictNotice = null;
+    const currentPhase = currentSnapshot?.phase ?? null;
+    if (currentPhase?.kind === "needs_setup") {
+      const checking = currentSnapshot?.readiness.checking ?? false;
+      const entered = setupConflictCollectionId !== currentPhase.collectionId;
+      const settled = setupConflictCollectionId === currentPhase.collectionId && setupConflictChecking && !checking;
+      setupConflictCollectionId = currentPhase.collectionId;
+      setupConflictChecking = checking;
+      if (entered) {setupConflict = null; setupConflictFeedback = null;}
+      if ((entered || settled) && !restoringSetup) inspectSetupPlan(currentPhase.collectionId);
+    } else {
+      setupConflictController?.abort();
+      setupConflictController = null;
+      setupConflict = null;
+      setupConflictCollectionId = null;
+      setupConflictChecking = false;
+      setupConflictFeedback = null;
+    }
     const next = journalConnection(mdbase);
     if (next !== data?.connection) {
       unlistenData?.(); unlistenData = null; unlistenStatus?.(); unlistenStatus = null; unlistenEntries?.(); unlistenEntries = null; refreshEntries = null;
@@ -527,10 +598,52 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   listen(element("menu-button"), "click", event => openMenu(event.currentTarget as HTMLElement));
   listen(element("close-menu"), "click", () => menu.close());
   listen(menu, "close", () => {
+    setupConflictNotice = null;
     const candidate = element<HTMLInputElement>("folder").value.trim() || "journal";
     try {notePath(new Date(), candidate); transaction(() => {drafts.savePreferences({...preferences, folder: candidate}); folder = candidate;});}
     catch {problem = "Choose a folder within this collection that Journal can preserve on this device."; render();}
     menuOpener?.focus();
+  });
+  listen(element("restore-setup-definition"), "click", () => {
+    const active = setupConflict;
+    if (!mdbase || disposed || restoringSetup || switchingSetupCollection || !active?.canRestoreWithBackup) return;
+    restoringSetup = true; setupConflictFeedback = null; setupConflictNotice = null; render();
+    void restoreSetupDefinitions(mdbase, active.collectionId, active.restorable.map(item => item.target), {signal: caller.signal}).then(result => {
+      if (disposed) return;
+      const confirmation = restoreConfirmationText(result);
+      setupConflictNotice = confirmation;
+      setupConflictFeedback = confirmation;
+    }, error => {
+      if (disposed) return;
+      setupConflictFeedback = error instanceof Error && error.message.trim() ? error.message : "Could not restore Journal’s definition. Your file was left unchanged.";
+    }).finally(() => {
+      restoringSetup = false;
+      if (disposed) return;
+      const currentPhase = snapshot()?.phase;
+      if (currentPhase?.kind === "needs_setup") inspectSetupPlan(currentPhase.collectionId);
+      render();
+    });
+  });
+  listen(element("switch-setup-collection"), "click", () => {
+    if (!mdbase || disposed || restoringSetup || switchingSetupCollection) return;
+    switchingSetupCollection = true; setupConflictFeedback = null; render();
+    void mdbase.chooseAnother({signal: caller.signal}).catch(error => {
+      if (disposed) return;
+      const described = describeError(error);
+      setupConflictFeedback = described && described.key !== "unknown" && described.key !== "internal"
+        ? described.message
+        : "Could not switch collections right now. Try again.";
+    }).finally(() => {
+      switchingSetupCollection = false;
+      if (!disposed) render();
+    });
+  });
+  listen(element("cancel-setup-conflict"), "click", () => {
+    if (disposed || restoringSetup || switchingSetupCollection) return;
+    setupConflictNotice = null;
+    setupConflictFeedback = null;
+    if (menu.open) menu.close();
+    else render();
   });
   listen(typeChoice, "change", () => {
     type = types.find(item => item.name === typeChoice.value) ?? null;
@@ -605,7 +718,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   renderPage(); changed(); render();
   return {currentDraft: () => current, newPage, undoNewPage, dispose() {
     if (disposed) return;
-    disposed = true; caller.abort(); clearUndo(); unlistenApp(); unlistenData?.(); unlistenStatus?.(); unlistenEntries?.(); opens?.dispose(); data?.release();
+    disposed = true; caller.abort(); setupConflictController?.abort(); setupConflictController = null; clearUndo(); unlistenApp(); unlistenData?.(); unlistenStatus?.(); unlistenEntries?.(); opens?.dispose(); data?.release();
     for (const part of mounted) part.unmount();
     // No SDK replacement, physical close or borrowed-client shutdown on disposal.
   }};
