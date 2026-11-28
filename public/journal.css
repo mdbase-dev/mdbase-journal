@@ -14,9 +14,9 @@ body > header { top:0; padding-top:max(14px,env(safe-area-inset-top)); backgroun
 body > footer { bottom:0; flex-wrap:wrap; padding-bottom:max(14px,env(safe-area-inset-bottom)); pointer-events:none; }
 body > footer > * { pointer-events:auto; }
 body.quiet > header:not(:focus-within),body.quiet .hint:not(:focus-within) { opacity:0; pointer-events:none; }
-@media (hover:none),(pointer:coarse) { body.quiet > header:not(:focus-within) { opacity:1; pointer-events:auto; } body.quiet > header:not(:focus-within) .context { opacity:0; } body.quiet > header:not(:focus-within) #menu-button { opacity:.4; } }
+@media (hover:none),(pointer:coarse) { body.quiet > header:not(:focus-within) { opacity:1; pointer-events:auto; } }
 main { display:flex; justify-content:center; }
-textarea { display:block; width:100%; max-width:680px; min-height:100vh; min-height:100dvh; overflow:hidden; padding:16vh 16px 40vh; border:0; outline:0; resize:none; background:transparent; color:var(--ink); caret-color:var(--caret); font:400 1.3125rem/1.6 Newsreader,Georgia,serif; font-optical-sizing:auto; }
+textarea { field-sizing:content; display:block; width:100%; max-width:680px; min-height:100vh; min-height:100dvh; overflow:hidden; padding:16vh 16px 40vh; border:0; outline:0; resize:none; background:transparent; color:var(--ink); caret-color:var(--caret); font:400 1.3125rem/1.6 Newsreader,Georgia,serif; font-optical-sizing:auto; }
 /* The shared UI rings every :focus-visible element; the writing page is the focus itself. */
 #page:focus-visible { outline:0; }
 :where(button:not(.mdbase-collections *)) { font:inherit; color:inherit; background:none; border:0; padding:6px 8px; margin:-6px -8px; border-radius:6px; cursor:pointer; }

@@ -296,3 +296,20 @@ test("existing entries save without choosing a type in a collection with several
     assert.equal((await f.records.get(view.currentDraft().recordId!, {include: {body: true}})).body, page.value);
   } finally {lease?.release(); create.mock.restore(); view.dispose(); describe.mock.restore(); window.close(); await f.fixture.close();}
 });
+
+test("a refused day lookup can still resume a local draft on the requested date", async () => {
+  const h = await applicationFixture(), window = new JSDOM(html, {url: "https://journal.fixture/"}).window;
+  const drafts = new JournalDrafts(memoryStorage());
+  const first = drafts.put({...drafts.blank(h.connection.id, new Date(2026, 0, 1, 12)), body: "First offline edit", finished: true});
+  const second = drafts.put({...drafts.blank(h.connection.id, new Date(2026, 0, 2, 12)), body: "Second offline edit"});
+  const lookup = mock.method(JournalData.prototype, "entries", async () => {throw new Error("offline");});
+  const view = mountJournal(window.document, drafts, h.mdbase);
+  try {
+    assert.equal(view.currentDraft().id, second.id);
+    window.document.getElementById("previous-day")!.click();
+    for (let i = 0; i < 100 && view.currentDraft().id !== first.id; i++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(view.currentDraft().id, first.id);
+    assert.equal(view.currentDraft().body, first.body);
+    assert.equal(drafts.get(second.id)?.body, second.body);
+  } finally {lookup.mock.restore(); view.dispose(); window.close(); h.close();}
+});

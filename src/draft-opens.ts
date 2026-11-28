@@ -1,4 +1,4 @@
-import {JournalDrafts} from "./drafts.js";
+import {hasDraftContent, JournalDrafts} from "./drafts.js";
 import type {JournalData, JournalEntryType} from "./journal-data.js";
 export interface DraftOpenState {readonly state: "opening" | "unresolved"}
 /** Independent acquisition of original SDK record leases. This is not autosave:
@@ -50,7 +50,7 @@ export class DraftOpens {
   request(id: string, type?: JournalEntryType, viewed = false, edited = false): void {
     if (this.disposed || !this.isCurrent()) return;
     const draft = this.drafts.get(id);
-    if (!draft || draft.deletedElsewhere || draft.reviewRequired || draft.legacyKey || !draft.body.trim() || draft.body === draft.savedBody && (!viewed || !draft.recordId) ||
+    if (!draft || draft.deletedElsewhere || draft.reviewRequired || draft.legacyKey || !hasDraftContent(draft) || draft.body === draft.savedBody && (!viewed || !draft.recordId) ||
         draft.targetCollectionId && draft.targetCollectionId !== this.data.connection.id || this.data.snapshot(id) || this.jobs.has(id)) return;
     this.types.set(id, type);
     if (!this.owns(id)) {

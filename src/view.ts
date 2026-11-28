@@ -1,7 +1,7 @@
 import {describeDiagnostic, describeError, type Mdbase, type MdbaseSnapshot} from "@mdbase-dev/sdk";
 import {mountCollectionUi, type MountedCollectionUi} from "@mdbase-dev/ui/collections";
 import {journalConnection} from "./application.js";
-import {DraftConflictError, DraftPersistenceError, draftRevision, JournalDrafts, notePath, type JournalDraft} from "./drafts.js";
+import {DraftConflictError, DraftPersistenceError, draftRevision, hasDraftContent, JournalDrafts, notePath, type JournalDraft} from "./drafts.js";
 import {DELETED_ENTRY_NOTICE, JournalCatalogError, JournalData, type JournalEntry, type JournalEntryType} from "./journal-data.js";
 import {DraftOpens} from "./draft-opens.js";
 import {connectionNotice, connectionNoticeLabels} from "./connection-notice.js";
@@ -16,6 +16,7 @@ import {
 export interface JournalView {dispose(): void; currentDraft(): JournalDraft; newPage(): void; undoNewPage(): void}
 const app = {name: "Journal"};
 const entriesPerPage = 50;
+type PickerEntry = JournalEntry & {draft?: JournalDraft};
 
 function dayBounds(year: number, month: number, day: number): [start: number, end: number] {
   const midnight = (day: number) => {
@@ -103,7 +104,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   let observedCollectionId = mdbase?.getSnapshot().selectedCollectionId ?? null;
   let current = drafts.blank(observedCollectionId);
   try {
-    const earlier = drafts.list().filter(draft => !draft.legacyKey && (draft.body.trim() || draft.reviewRequired || draft.deletedElsewhere && draft.body !== draft.savedBody) &&
+    const earlier = drafts.list().filter(draft => !draft.legacyKey && (hasDraftContent(draft) || draft.reviewRequired || draft.deletedElsewhere && draft.body !== draft.savedBody) &&
       (!draft.deletedElsewhere || draft.body !== draft.savedBody) && (!observedCollectionId || draft.targetCollectionId === observedCollectionId))
       .sort((a, b) => Number(a.finished) - Number(b.finished) || b.touchedMs - a.touchedMs)[0];
     if (earlier) current = drafts.patch(earlier.id, {finished: false});
@@ -161,7 +162,9 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   /** Grow the page to its text without moving the reader. Measuring through
    * `auto` briefly shortens the document, and the browser clamps the scroll
    * position to it; on a phone that drops the caret behind the keyboard. */
+  const autoHeight = document.defaultView?.CSS?.supports("field-sizing", "content");
   function fit(): void {
+    if (autoHeight) return;
     const view = document.defaultView, y = view?.scrollY ?? 0;
     page.style.height = "auto";
     page.style.height = `${Math.max(240, page.scrollHeight)}px`;
@@ -172,18 +175,28 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   function revealCaret(): void {
     const view = document.defaultView, viewport = view?.visualViewport;
     if (!view || !viewport || document.activeElement !== page || page.selectionStart !== page.selectionEnd) return;
-    const style = view.getComputedStyle(page), mirror = document.createElement("div"), caret = document.createElement("span");
-    for (const name of ["boxSizing", "width", "paddingTop", "paddingLeft", "paddingRight", "borderTopWidth", "borderLeftWidth", "borderRightWidth", "fontFamily", "fontSize", "fontWeight", "fontStyle", "fontVariationSettings", "fontOpticalSizing", "letterSpacing", "wordSpacing", "lineHeight", "textIndent", "textTransform", "tabSize"] as const) mirror.style[name] = style[name];
-    Object.assign(mirror.style, {position: "absolute", top: "0", left: "0", visibility: "hidden", borderStyle: "solid", borderColor: "transparent", whiteSpace: "pre-wrap", overflowWrap: "break-word"});
-    mirror.textContent = page.value.slice(0, page.selectionEnd);
-    caret.textContent = "​"; mirror.append(caret); document.body.append(mirror);
-    const caretTop = page.getBoundingClientRect().top + caret.offsetTop, line = parseFloat(style.lineHeight) || caret.offsetHeight;
-    mirror.remove();
+    const style = view.getComputedStyle(page), rect = page.getBoundingClientRect();
+    const line = parseFloat(style.lineHeight);
+    // An intrinsically sized page taller than its minimum ends at its last
+    // line. Appending there needs no second layout of the full note.
+    const caretTop = autoHeight && page.selectionEnd === page.value.length && rect.height > parseFloat(style.minHeight) + 1
+      ? rect.bottom - parseFloat(style.paddingBottom) - line : rect.top + caretOffset();
+    function caretOffset(): number {
+      const mirror = document.createElement("div"), caret = document.createElement("span");
+      for (const name of ["boxSizing", "width", "paddingTop", "paddingLeft", "paddingRight", "borderTopWidth", "borderLeftWidth", "borderRightWidth", "fontFamily", "fontSize", "fontWeight", "fontStyle", "fontVariationSettings", "fontOpticalSizing", "letterSpacing", "wordSpacing", "lineHeight", "textIndent", "textTransform", "tabSize"] as const) mirror.style[name] = style[name];
+      Object.assign(mirror.style, {position: "absolute", top: "0", left: "0", visibility: "hidden", borderStyle: "solid", borderColor: "transparent", whiteSpace: "pre-wrap", overflowWrap: "break-word"});
+      mirror.textContent = page.value.slice(0, page.selectionEnd);
+      caret.textContent = "​"; mirror.append(caret); document.body.append(mirror);
+      const offset = caret.offsetTop;
+      mirror.remove();
+      return offset;
+    }
     const top = Math.max(viewport.offsetTop, element("menu-button").closest("header")!.getBoundingClientRect().bottom);
     const bottom = Math.min(viewport.offsetTop + viewport.height, element("status-button").closest("footer")!.getBoundingClientRect().top) - 8;
     if (caretTop + line > bottom) view.scrollBy(0, caretTop + line - bottom);
     else if (caretTop < top) view.scrollBy(0, caretTop - top);
   }
+  let countedBody: string | null = null;
   let renderedDraftId = current.id;
   function renderPage(): void {
     deletedCopyFeedback = "";
@@ -235,7 +248,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     try {
       const localDrafts = drafts.list();
       if (entriesDialog.open) renderEntries(localDrafts);
-      unresolved = localDrafts.filter(draft => draft.reviewRequired || !!draft.body.trim() && draft.body !== draft.savedBody);
+      unresolved = localDrafts.filter(draft => draft.reviewRequired || hasDraftContent(draft) && draft.body !== draft.savedBody);
     } catch {
       if (entriesDialog.open) {entriesProblem = "Earlier notes could not be read on this device."; renderEntries([]);}
       problem = "Keep this page open: Journal cannot read its drafts on this device.";
@@ -317,7 +330,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     typeChoice.replaceChildren(option("Choose a type…", ""), ...types.map(item => option(item.name, item.name)));
     typeChoice.value = type?.name ?? "";
     element("type-row").hidden = types.length < 2;
-    element("new-button").hidden = !current.body.trim() || !!current.deletedElsewhere;
+    element("new-button").hidden = !hasDraftContent(current) || !!current.deletedElsewhere;
     element("undo-button").hidden = !undoId;
     const retryCurrent = recovering(current.id), retryElement = element<HTMLButtonElement>("retry-button");
     retryElement.hidden = !retryCurrent; retryButton(retryElement, current.id);
@@ -353,12 +366,18 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     noticeElement.textContent = setupConflictNotice ?? "";
     document.body.classList.toggle("undo", !!undoId);
     element("keys").textContent = /Mac|iPhone|iPad/.test(document.defaultView?.navigator.platform ?? "") ? "⌘↩" : "Ctrl+↩";
-    const words = segmenter ? [...segmenter.segment(current.body)].filter(item => item.isWordLike).length : current.body.match(/\S+/g)?.length ?? 0;
-    element("word-count").textContent = `${words} word${words === 1 ? "" : "s"}`;
-    element("word-count").hidden = words === 0;
+    if (current.body !== countedBody) {
+      countedBody = current.body;
+      let words = 0;
+      if (segmenter) {
+        for (const part of segmenter.segment(current.body)) if (part.isWordLike) words++;
+      } else words = current.body.match(/\S+/g)?.length ?? 0;
+      element("word-count").textContent = `${words} word${words === 1 ? "" : "s"}`;
+      element("word-count").hidden = words === 0;
+    }
   }
   function newPage(): void {transaction(() => {
-    if (!current.body.trim() && !current.deletedElsewhere) {page.focus(); return;}
+    if (!hasDraftContent(current) && !current.deletedElsewhere) {page.focus(); return;}
     if (memoryOnly) {problem = "Keep this page open: its text has not been preserved on this device."; render(); return;}
     const previous = current;
     try {
@@ -382,30 +401,32 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     try {
       const earlier = drafts.get(id);
       if (!earlier) throw new DraftPersistenceError();
-      if (current.body.trim()) drafts.patch(current.id, {finished: true, touchedMs: Date.now()});
+      if (hasDraftContent(current)) drafts.patch(current.id, {finished: true, touchedMs: Date.now()});
       current = drafts.patch(id, {finished: false, touchedMs: Date.now()}); unpersistedDraft = false;
       clearUndo(); problem = null; renderPage(); save();
       if (current.id === id) onSelected?.();
       page.focus();
     } catch {problem = "Keep this page open: Journal cannot restore the earlier text safely."; render();}
   });}
-  function visibleEntries(bounds: [number, number] | null, localDrafts: readonly JournalDraft[]): {entry: JournalEntry; draft: JournalDraft | null}[] {
+  function visibleEntries(bounds: [number, number] | null, localDrafts: readonly JournalDraft[], history = entries): PickerEntry[] {
     const collection = snapshot()?.selectedCollectionId ?? current.targetCollectionId;
     const local = localDrafts.filter(draft => draft.targetCollectionId === collection &&
-      (draft.deletedElsewhere ? draft.body !== draft.savedBody : draft.reviewRequired || draft.body.trim()));
+      (draft.deletedElsewhere ? draft.body !== draft.savedBody : draft.reviewRequired || hasDraftContent(draft)));
     const [start, end] = bounds ?? [-Infinity, Infinity];
-    const saved = bounds ? entries.slice(firstOlderThan(entries, end), firstOlderThan(entries, start)) : entries;
+    const saved = bounds ? history.slice(firstOlderThan(history, end), firstOlderThan(history, start)) : history;
+    if (!local.length) return saved;
     const localRecordIds = new Set(local.map(draft => draft.recordId));
-    const rows = saved.filter(entry => !localRecordIds.has(entry.id))
-      .map(entry => ({entry, draft: null as JournalDraft | null}));
+    const rows: PickerEntry[] = saved.filter(entry => !localRecordIds.has(entry.id));
     for (const draft of local) {
       if (draft.createdMs < start || draft.createdMs >= end) continue;
-      rows.push({entry: {id: draft.id, created: draft.created, createdMs: draft.createdMs, path: draft.path ?? ""}, draft});
+      rows.push({id: draft.id, created: draft.created, createdMs: draft.createdMs, path: draft.path ?? "", draft});
     }
-    return rows.sort((a, b) => b.entry.createdMs - a.entry.createdMs);
+    return rows.sort((a, b) => b.createdMs - a.createdMs);
   }
+  let displayedRows: PickerEntry[] = [];
+  let displayedMemoryOnly: boolean | null = null;
   function renderEntries(localDrafts?: readonly JournalDraft[]): void {
-    let rows: ReturnType<typeof visibleEntries> = [];
+    let rows: PickerEntry[] = [];
     try {
       const [year, month, day] = entryDate.value.split("-").map(Number);
       const bounds = year && month && day ? dayBounds(year, month - 1, day) : null;
@@ -421,15 +442,24 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     olderEntries.disabled = last === rows.length;
     const range = rows.length > entriesPerPage ? `${first + 1}–${last} of ${rows.length}` : "";
     if (entryRange.textContent !== range) entryRange.textContent = range;
+    const visible = rows.slice(first, last);
+    if (displayedMemoryOnly === memoryOnly && displayedRows.length === visible.length && visible.every((entry, i) => {
+      const previous = displayedRows[i]!;
+      return previous.id === entry.id && previous.path === entry.path && previous.created === entry.created && previous.createdMs === entry.createdMs &&
+        previous.draft?.body === entry.draft?.body && previous.draft?.deletedElsewhere === entry.draft?.deletedElsewhere;
+    })) return;
+    displayedRows = visible;
+    displayedMemoryOnly = memoryOnly;
     const focusedId = entryList.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.entryId : null;
     let refocus: HTMLButtonElement | undefined;
-    entryList.replaceChildren(...rows.slice(first, last).map(({entry, draft}) => {
+    entryList.replaceChildren(...visible.map(entry => {
+      const draft = entry.draft;
       const button = document.createElement("button"); button.type = "button";
       button.dataset.entryId = entry.id;
       if (entry.id === focusedId) refocus = button;
       const date = document.createElement("span"), summary = document.createElement("small");
       date.textContent = entryLabel.format(entry.createdMs);
-      summary.textContent = draft?.body.trim().split("\n")[0]?.slice(0, 100) ?? entry.path.split("/").pop() ?? "Journal entry";
+      summary.textContent = draft?.body.trim().slice(0, 100).split("\n")[0] || entry.path.split("/").pop() || "Journal entry";
       if (draft?.deletedElsewhere) summary.textContent = `Deleted elsewhere · ${summary.textContent || "Your text stays on this device"}`;
       button.append(date, summary); button.disabled = memoryOnly;
       button.onclick = () => {
@@ -440,7 +470,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
         void owned.resume(entry).then(value => {
           if (disposed || data !== owned) return;
           restoreDraft(value.id, closeEntries);
-        }, () => {if (!disposed && data === owned) {entriesProblem = "This entry could not be opened. Your current page is unchanged."; renderEntries();}});
+        }, () => {if (!disposed && data === owned) {button.disabled = memoryOnly; entriesProblem = "This entry could not be opened. Your current page is unchanged."; renderEntries();}});
       };
       return button;
     }));
@@ -455,11 +485,12 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     if (types.length) void refreshEntries?.();
   }
   function closeEntries(): void {entriesDialog.close();}
+  listen(entriesDialog, "close", () => {displayedRows = []; displayedMemoryOnly = null;});
   function startOnDate(date: Date, onSelected?: () => void): void {transaction(() => {
     if (memoryOnly || !Number.isFinite(date.getTime())) return;
     try {
       const next = drafts.blank(snapshot()?.selectedCollectionId ?? null, date);
-      if (current.body.trim()) drafts.patch(current.id, {finished: true, touchedMs: Date.now()});
+      if (hasDraftContent(current)) drafts.patch(current.id, {finished: true, touchedMs: Date.now()});
       current = next; unpersistedDraft = true;
       clearUndo(); problem = null; renderPage(); render(); onSelected?.(); page.focus();
     } catch {problem = "Keep this page open: Journal cannot preserve its text on this device."; render();}
@@ -477,14 +508,24 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     element<HTMLButtonElement>("next-day").disabled = true;
     try {
       if (owned) {
-        const availableTypes = types.length ? types : await owned.types();
-        const loaded = await owned.entries(availableTypes);
-        if (!stillCurrent()) return;
-        entries = loaded;
+        try {
+          const availableTypes = types.length ? types : await owned.types();
+          const loaded = await owned.entries(availableTypes);
+          if (!stillCurrent()) return;
+          entries = loaded;
+        } catch (error) {
+          if (!stillCurrent()) return;
+          // A failed listing cannot establish an empty date. An existing
+          // local draft can still be resumed by its original identity.
+          const cached = visibleEntries(destination, drafts.list(), [])[0]?.draft;
+          if (!cached) throw error;
+          restoreDraft(cached.id);
+          return;
+        }
       }
       const row = visibleEntries(destination, drafts.list())[0];
       if (row) {
-        const earlier = row.draft ?? await owned?.resume(row.entry);
+        const earlier = row.draft ?? await owned?.resume(row);
         if (!stillCurrent() || !earlier) return;
         restoreDraft(earlier.id);
       } else startOnDate(date);
@@ -509,7 +550,6 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   listen(newerEntries, "click", () => moveEntryPage(-1));
   listen(olderEntries, "click", () => moveEntryPage(1));
   listen(element("close-entries"), "click", closeEntries);
-  listen(entriesDialog, "close", () => page.focus());
   listen(element("write-date"), "click", () => {
     startOnDate(entryDate.value ? new Date(`${entryDate.value}T12:00:00`) : new Date(), closeEntries);
   });
@@ -578,7 +618,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     if (next !== data?.connection) {
       unlistenData?.(); unlistenData = null; unlistenStatus?.(); unlistenStatus = null; unlistenEntries?.(); unlistenEntries = null; refreshEntries = null;
       opens?.dispose(); opens = null; data?.release(); data = null; types = []; type = null; catalogProblem = null;
-      entries = []; entryPage = 0; entriesLoading = !!next && entriesDialog.open;
+      displayedMemoryOnly = null; entries = []; entryPage = 0; entriesLoading = !!next && entriesDialog.open;
       if (next) {
         const owned = new JournalData(next, drafts); data = owned;
         let refreshing: Promise<void> | null = null, refreshAgain = false;
@@ -639,7 +679,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       try {
         if (!current.targetCollectionId && selectedId && !current.legacyKey) {
           current = unpersistedDraft ? {...current, targetCollectionId: selectedId} : drafts.patch(current.id, {targetCollectionId: selectedId});
-        } else if (current.body.trim()) {
+        } else if (hasDraftContent(current)) {
           const next = drafts.blank(selectedId);
           drafts.patch(current.id, {finished: true, touchedMs: Date.now()}); current = next; unpersistedDraft = true; renderPage();
         } else current = unpersistedDraft ? {...current, targetCollectionId: selectedId} : drafts.patch(current.id, {targetCollectionId: selectedId});
@@ -661,7 +701,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       if (current.id === base.id && epoch === inputEpoch) {current = value; memoryOnly = false; unpersistedDraft = false; problem = null;}
       if (owned === data && owned?.snapshot(base.id)) {
         void owned.setBody(base.id, body, source).catch(error => {
-          if (current.id === base.id) {conflicted = true; problem = error instanceof Error ? error.message : "Your original save needs review."; render();}
+          if (current.id === base.id) {conflicted ||= error instanceof DraftConflictError; problem = error instanceof Error ? error.message : "Your original save needs review."; render();}
         });
       } else void save();
     }).catch(error => {
@@ -821,7 +861,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
           } catch {/* Missing source text leaves the durable draft for review. */}
         }
         if (baseline) void owned.setBody(draft.id, draft.body, baseline).catch(error => {
-          if (draft.id === current.id) {conflicted = true; problem = error instanceof Error ? error.message : "Your original save needs review.";}
+          if (draft.id === current.id) {conflicted ||= error instanceof DraftConflictError; problem = error instanceof Error ? error.message : "Your original save needs review.";}
           render();
         });
       }
