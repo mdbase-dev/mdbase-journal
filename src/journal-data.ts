@@ -81,8 +81,10 @@ export class JournalData {
       for (const record of page.records) {
         const type = types.find(type => record.types.includes(type.name));
         const created = type ? record.frontmatter[type.createdField] : null;
-        if (typeof created !== "string" || !Number.isFinite(Date.parse(created))) continue;
-        entries.push({id: record.id, created, createdMs: Date.parse(created), path: record.path});
+        if (typeof created !== "string") continue;
+        const createdMs = Date.parse(created);
+        if (!Number.isFinite(createdMs)) continue;
+        entries.push({id: record.id, created, createdMs, path: record.path});
       }
     }
     // A query can omit a record because its type/date changed. Only an ordinary

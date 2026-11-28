@@ -14,6 +14,28 @@ import {
 } from "./setup-conflicts.js";
 export interface JournalView {dispose(): void; currentDraft(): JournalDraft; newPage(): void; undoNewPage(): void}
 const app = {name: "Journal"};
+const entriesPerPage = 50;
+
+function dayBounds(year: number, month: number, day: number): [start: number, end: number] {
+  const midnight = (day: number) => {
+    const local = new Date(0);
+    local.setFullYear(year, month, day);
+    return local.setHours(0, 0, 0, 0);
+  };
+  return [midnight(day), midnight(day + 1)];
+}
+
+/** JournalData returns newest first, so a date filter can skip unrelated entries. */
+function firstOlderThan(entries: readonly JournalEntry[], time: number): number {
+  let start = 0, end = entries.length;
+  while (start < end) {
+    const middle = Math.floor((start + end) / 2);
+    if (entries[middle]!.createdMs >= time) start = middle + 1;
+    else end = middle;
+  }
+  return start;
+}
+
 interface TypesProblem {readonly title: string; readonly detail: string}
 /** Why the open collection gives Journal no entry type. Journal's own catalog
  * checks explain themselves; SDK errors use SDK copy; anything else is named
@@ -86,10 +108,14 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     unpersistedDraft = !earlier;
   } catch {problem = "Earlier notes could not be read on this device. Their text is still preserved.";}
   const entriesDialog = element<HTMLDialogElement>("entries"), entryDate = element<HTMLInputElement>("entry-date");
+  const entryList = element("entry-list"), entryStatus = element("entries-status");
+  const entryPagination = element("entry-pagination"), entryRange = element("entry-range");
+  const newerEntries = element<HTMLButtonElement>("newer-entries"), olderEntries = element<HTMLButtonElement>("older-entries");
+  const entryLabel = new Intl.DateTimeFormat(undefined, {weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit"});
   let entries: JournalEntry[] = [];
+  let entryPage = 0;
   let entriesProblem: string | null = null;
   let entriesLoading = false;
-  const dateKey = (ms: number): string => {const date = new Date(ms); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;};
   try {drafts.pruneConfirmed();} catch {/* Best-effort cleanup never interrupts local writing. */}
   try {drafts.importLegacy();} catch {problem = "Earlier notes could not be copied on this device. Their original text is still preserved.";}
   const listen = (target: EventTarget, name: string, handler: EventListener) => target.addEventListener(name, handler, {signal: caller.signal});
@@ -197,7 +223,6 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     element("start-new-after-deletion").hidden = !current.deletedElsewhere;
     element("use-saved-version").hidden = !!current.deletedElsewhere;
     element<HTMLButtonElement>("use-saved-version").disabled = !!current.deletedElsewhere || current.reviewRequired === true && !data;
-    if (entriesDialog.open) renderEntries();
     document.body.classList.toggle("typing", !!current.body.trim());
     const state = snapshot();
     const phase = state?.phase ?? null;
@@ -205,7 +230,14 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       phase && "displayName" in phase && phase.displayName ? phase.displayName : "your collection";
     const record = data?.snapshot(current.id);
     let unresolved: JournalDraft[] = [];
-    try {unresolved = drafts.list().filter(draft => !!draft.body.trim() && draft.body !== draft.savedBody);} catch {problem = "Keep this page open: Journal cannot read its drafts on this device.";}
+    try {
+      const localDrafts = drafts.list();
+      if (entriesDialog.open) renderEntries(localDrafts);
+      unresolved = localDrafts.filter(draft => !!draft.body.trim() && draft.body !== draft.savedBody);
+    } catch {
+      if (entriesDialog.open) {entriesProblem = "Earlier notes could not be read on this device."; renderEntries([]);}
+      problem = "Keep this page open: Journal cannot read its drafts on this device.";
+    }
     let message = problem ?? data?.problem(current.id);
     const opening = opens?.state(current.id);
     if (!message && current.deletedElsewhere) message = DELETED_ENTRY_NOTICE;
@@ -348,24 +380,46 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       page.focus();
     } catch {problem = "Keep this page open: Journal cannot restore the earlier text safely."; render();}
   });}
-  function visibleEntries(): {entry: JournalEntry; draft: JournalDraft | null}[] {
+  function visibleEntries(bounds: [number, number] | null, localDrafts: readonly JournalDraft[]): {entry: JournalEntry; draft: JournalDraft | null}[] {
     const collection = snapshot()?.selectedCollectionId ?? current.targetCollectionId;
-    const local = drafts.list().filter(draft => draft.targetCollectionId === collection &&
+    const local = localDrafts.filter(draft => draft.targetCollectionId === collection &&
       (draft.deletedElsewhere ? draft.body !== draft.savedBody : draft.body.trim()));
-    const rows = entries.filter(entry => !local.some(draft => draft.recordId === entry.id))
+    const [start, end] = bounds ?? [-Infinity, Infinity];
+    const saved = bounds ? entries.slice(firstOlderThan(entries, end), firstOlderThan(entries, start)) : entries;
+    const localRecordIds = new Set(local.map(draft => draft.recordId));
+    const rows = saved.filter(entry => !localRecordIds.has(entry.id))
       .map(entry => ({entry, draft: null as JournalDraft | null}));
-    rows.push(...local.map(draft => ({entry: {id: draft.id, created: draft.created, createdMs: draft.createdMs, path: draft.path ?? ""}, draft})));
+    for (const draft of local) {
+      if (draft.createdMs < start || draft.createdMs >= end) continue;
+      rows.push({entry: {id: draft.id, created: draft.created, createdMs: draft.createdMs, path: draft.path ?? ""}, draft});
+    }
     return rows.sort((a, b) => b.entry.createdMs - a.entry.createdMs);
   }
-  function renderEntries(): void {
+  function renderEntries(localDrafts?: readonly JournalDraft[]): void {
     let rows: ReturnType<typeof visibleEntries> = [];
-    try {rows = visibleEntries().filter(row => !entryDate.value || dateKey(row.entry.createdMs) === entryDate.value);}
+    try {
+      const [year, month, day] = entryDate.value.split("-").map(Number);
+      const bounds = year && month && day ? dayBounds(year, month - 1, day) : null;
+      rows = visibleEntries(bounds, localDrafts ?? drafts.list());
+    }
     catch {entriesProblem = "Earlier notes could not be read on this device.";}
-    element("entries-status").textContent = entriesProblem ?? (entriesLoading ? "Loading entries…" : rows.length ? "" : "No entries on this date. Start a page below.");
-    element("entry-list").replaceChildren(...rows.map(({entry, draft}) => {
+    const message = entriesProblem ?? (entriesLoading ? "Loading entries…" : rows.length ? "" : "No entries on this date. Start a page below.");
+    if (entryStatus.textContent !== message) entryStatus.textContent = message;
+    entryPage = Math.min(entryPage, Math.max(0, Math.ceil(rows.length / entriesPerPage) - 1));
+    const first = entryPage * entriesPerPage, last = Math.min(first + entriesPerPage, rows.length);
+    entryPagination.hidden = rows.length <= entriesPerPage;
+    newerEntries.disabled = first === 0;
+    olderEntries.disabled = last === rows.length;
+    const range = rows.length > entriesPerPage ? `${first + 1}–${last} of ${rows.length}` : "";
+    if (entryRange.textContent !== range) entryRange.textContent = range;
+    const focusedId = entryList.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.entryId : null;
+    let refocus: HTMLButtonElement | undefined;
+    entryList.replaceChildren(...rows.slice(first, last).map(({entry, draft}) => {
       const button = document.createElement("button"); button.type = "button";
+      button.dataset.entryId = entry.id;
+      if (entry.id === focusedId) refocus = button;
       const date = document.createElement("span"), summary = document.createElement("small");
-      date.textContent = new Date(entry.createdMs).toLocaleString(undefined, {weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit"});
+      date.textContent = entryLabel.format(entry.createdMs);
       summary.textContent = draft?.body.trim().split("\n")[0]?.slice(0, 100) ?? entry.path.split("/").pop() ?? "Journal entry";
       if (draft?.deletedElsewhere) summary.textContent = `Deleted elsewhere · ${summary.textContent || "Your text stays on this device"}`;
       button.append(date, summary); button.disabled = memoryOnly;
@@ -381,17 +435,15 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       };
       return button;
     }));
+    refocus?.focus({preventScroll: true});
   }
-  function browse(date = ""): void {
-    entryDate.value = date; entriesProblem = null; renderEntries();
+  function browse(): void {
+    entryDate.value = ""; entryPage = 0; entriesProblem = null; entriesLoading = !!data;
+    renderEntries(); entryList.scrollTop = 0;
     if (!entriesDialog.open) entriesDialog.showModal();
-    const owned = data;
-    if (!owned) return;
-    entriesLoading = true; renderEntries();
     // The ready connection can arrive before its catalog. Its completion below
     // refreshes this sheet; never mistake that interval for an empty journal.
-    if (!types.length) return;
-    void refreshEntries?.();
+    if (types.length) void refreshEntries?.();
   }
   function closeEntries(): void {entriesDialog.close();}
   function startOnDate(date: Date, onSelected?: () => void): void {transaction(() => {
@@ -409,7 +461,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     const originalId = current.id, owned = data;
     const date = new Date(current.createdMs);
     date.setDate(date.getDate() + offset); date.setHours(12, 0, 0, 0);
-    const destination = dateKey(date.getTime());
+    const destination = dayBounds(date.getFullYear(), date.getMonth(), date.getDate());
     const stillCurrent = (): boolean => !disposed && !memoryOnly && data === owned && current.id === originalId && !entriesDialog.open;
     navigatingDay = true;
     element<HTMLButtonElement>("previous-day").disabled = true;
@@ -421,7 +473,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
         if (!stillCurrent()) return;
         entries = loaded;
       }
-      const row = visibleEntries().find(row => dateKey(row.entry.createdMs) === destination);
+      const row = visibleEntries(destination, drafts.list())[0];
       if (row) {
         const earlier = row.draft ?? await owned?.resume(row.entry);
         if (!stillCurrent() || !earlier) return;
@@ -438,7 +490,15 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   listen(element("browse-button"), "click", () => browse());
   listen(element("previous-day"), "click", () => {void adjacentDay(-1);});
   listen(element("next-day"), "click", () => {void adjacentDay(1);});
-  listen(entryDate, "input", renderEntries);
+  listen(entryDate, "input", () => {entryPage = 0; renderEntries(); entryList.scrollTop = 0;});
+  function moveEntryPage(offset: number): void {
+    entryPage += offset;
+    renderEntries();
+    entryList.scrollTop = 0;
+    entryList.querySelector("button")?.focus();
+  }
+  listen(newerEntries, "click", () => moveEntryPage(-1));
+  listen(olderEntries, "click", () => moveEntryPage(1));
   listen(element("close-entries"), "click", closeEntries);
   listen(entriesDialog, "close", () => page.focus());
   listen(element("write-date"), "click", () => {
@@ -497,13 +557,13 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     if (next !== data?.connection) {
       unlistenData?.(); unlistenData = null; unlistenStatus?.(); unlistenStatus = null; unlistenEntries?.(); unlistenEntries = null; refreshEntries = null;
       opens?.dispose(); opens = null; data?.release(); data = null; types = []; type = null; catalogProblem = null;
-      entries = []; entriesLoading = false;
+      entries = []; entryPage = 0; entriesLoading = !!next && entriesDialog.open;
       if (next) {
         const owned = new JournalData(next, drafts); data = owned;
         let refreshing: Promise<void> | null = null, refreshAgain = false;
-        const refresh = (): Promise<void> => {
+        const refresh = (again = true): Promise<void> => {
           if (disposed || data !== owned || !types.length) return Promise.resolve();
-          if (refreshing) {refreshAgain = true; return refreshing;}
+          if (refreshing) {refreshAgain ||= again; return refreshing;}
           refreshing = (async () => {
             do {
               refreshAgain = false;
@@ -520,7 +580,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
           })().finally(() => {refreshing = null; if (refreshAgain) void refresh();});
           return refreshing;
         };
-        refreshEntries = refresh;
+        refreshEntries = () => refresh(false);
         opens = new DraftOpens(owned, drafts, () => !disposed && data === owned && owned.connection.isCurrent(), render, document.defaultView?.navigator.locks);
         unlistenData = owned.subscribe(render);
         // Entry types come from the collection's catalog. Until they load, notes
@@ -537,7 +597,6 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
             types = value; type = value.find(item => item.name === preferences.entryTypes?.[owned.connection.id]) ?? (value.length === 1 ? value[0]! : null);
             render(); void save();
             void refresh();
-            if (entriesDialog.open) browse(entryDate.value);
           }, error => {
             loadingTypes = false;
             if (disposed || data !== owned) return;

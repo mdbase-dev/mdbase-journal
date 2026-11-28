@@ -62,6 +62,81 @@ test("date navigation lists every local page, resumes its identity and survives 
   assert.equal(drafts.get(first.id)?.body, "First January page");
   reloaded.dispose(); window.close();
 });
+
+test("large entry history keeps pagination bounded and date filtering can reach the oldest page", () => {
+  const {window} = new JSDOM(html, {url: "https://journal.fixture/"});
+  const {document} = window;
+  const drafts = new JournalDrafts(memoryStorage());
+  for (let day = 1; day <= 120; day++) {
+    const entry = drafts.create(null, new Date(2025, 0, day, 12));
+    drafts.patch(entry.id, {body: `Page ${day}`, finished: true});
+  }
+  const view = mountJournal(document, drafts, null);
+  const dialog = document.querySelector<HTMLDialogElement>("#entries")!;
+  dialog.showModal = () => dialog.setAttribute("open", "");
+  dialog.close = () => dialog.removeAttribute("open");
+  const list = document.getElementById("entry-list")!;
+  const range = document.getElementById("entry-range")!;
+  const newer = document.querySelector<HTMLButtonElement>("#newer-entries")!;
+  const older = document.querySelector<HTMLButtonElement>("#older-entries")!;
+  const date = document.querySelector<HTMLInputElement>("#entry-date")!;
+  try {
+    document.getElementById("browse-button")!.click();
+    assert.equal(list.childElementCount, 50);
+    assert.equal(range.textContent, "1–50 of 120");
+    assert.equal(newer.disabled, true);
+    older.click();
+    assert.equal(range.textContent, "51–100 of 120");
+    assert.equal(document.activeElement, list.firstElementChild);
+    older.click();
+    assert.equal(list.childElementCount, 20);
+    assert.equal(range.textContent, "101–120 of 120");
+    assert.equal(older.disabled, true);
+    newer.click();
+    assert.equal(range.textContent, "51–100 of 120");
+
+    date.value = "2025-01-01";
+    date.dispatchEvent(new window.Event("input"));
+    assert.equal(list.childElementCount, 1);
+    assert.equal(document.getElementById("entry-pagination")!.hidden, true);
+    assert.equal(list.querySelector("small")!.textContent, "Page 1");
+    list.querySelector("button")!.click();
+    assert.equal(dialog.open, false);
+    assert.equal(view.currentDraft().body, "Page 1");
+  } finally {view.dispose(); window.close();}
+});
+test("date filtering uses local midnight and hides saved rows shadowed by a local draft", async () => {
+  const f = await applicationFixture();
+  const {window} = new JSDOM(html, {url: "https://journal.fixture/"});
+  const {document} = window;
+  const drafts = new JournalDrafts(memoryStorage());
+  const start = new Date(2025, 3, 6), end = new Date(2025, 3, 7);
+  const recordId = "018e0000-0000-7000-8000-000000000050";
+  const saved = (name: string, time: number, id = name) => ({id, created: new Date(time).toISOString(), createdMs: time, path: `journal/${name}.md`});
+  const shadowed = saved("shadowed", end.getTime() - 1, recordId);
+  await f.records.settle(f.records.create({id: recordId, type: "collection-owned-entry", path: shadowed.path,
+    frontmatter: {created: shadowed.created}, body: "Local copy"}));
+  const rows = [
+    saved("next-day", end.getTime()), shadowed,
+    saved("midnight", start.getTime()), saved("previous-day", start.getTime() - 1),
+  ];
+  const lookup = mock.method(JournalData.prototype, "entries", async () => rows);
+  const local = drafts.create(f.connection.id, new Date(end.getTime() - 1));
+  drafts.patch(local.id, {recordId, body: "Local copy", savedBody: "Local copy"});
+  const view = mountJournal(document, drafts, f.mdbase);
+  const dialog = document.querySelector<HTMLDialogElement>("#entries")!;
+  dialog.showModal = () => dialog.setAttribute("open", "");
+  const date = document.querySelector<HTMLInputElement>("#entry-date")!;
+  const summaries = () => [...document.querySelectorAll("#entry-list small")].map(item => item.textContent);
+  try {
+    document.getElementById("browse-button")!.click();
+    date.value = "2025-04-06";
+    date.dispatchEvent(new window.Event("input"));
+    for (let i = 0; i < 100 && summaries().length !== 2; i++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.deepEqual(summaries(), ["Local copy", "midnight.md"]);
+  } finally {view.dispose(); lookup.mock.restore(); window.close(); await f.fixture.close();}
+});
+
 test("day arrows resume the latest same-collection page and step empty dates without creating records", () => {
   const window = new JSDOM(html, {url: "https://journal.fixture/"}).window, document = window.document;
   const drafts = new JournalDrafts(memoryStorage());
