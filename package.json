@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "bench:history": "node node_modules/vitest/vitest.mjs bench --run benchmarks/journal-history.bench.mjs",
     "check:release-downloads": "node scripts/check-release-downloads.mjs",
     "test:release-downloads": "node --test scripts/check-release-downloads.test.mjs",
     "build": "node scripts/build-application.mjs",
@@ -35,6 +36,7 @@
     "esbuild": "0.28.1",
     "jsdom": "26.1.0",
     "sigstore": "4.1.1",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vitest": "3.2.6"
   }
 }
