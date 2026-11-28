@@ -6,6 +6,7 @@ import {DELETED_ENTRY_NOTICE, JournalCatalogError, JournalData, type JournalEntr
 import {DraftOpens} from "./draft-opens.js";
 import {connectionNotice, connectionNoticeLabels} from "./connection-notice.js";
 import {
+  bundledSetupDefinitions,
   inspectSetupConflicts,
   restoreConfirmationText,
   restoreSetupDefinitions,
@@ -79,6 +80,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   let setupConflictCollectionId: string | null = null;
   let setupConflictChecking = false;
   let setupConflictController: AbortController | null = null;
+  let recheckingSetup = false;
   let restoringSetup = false;
   let switchingSetupCollection = false;
   let setupConflictFeedback: string | null = null;
@@ -323,18 +325,25 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     element("menu-connection").textContent = openId && catalogProblem ? `${catalogProblem.title}. ${catalogProblem.detail}` :
       openId ? `Notes save to ${name}.` : "Notes stay on this device until a collection is open.";
     const recovery = element("setup-conflict-recovery");
+    // The shared panel still owns normal setup and its collection navigation.
+    // While Journal reviews a conflict, hide the shared replacement controls.
+    element("collection-panel").toggleAttribute("data-journal-recovery", !!setupConflictController || !!setupConflict);
     recovery.hidden = !setupConflict;
     if (setupConflict) {
       element("setup-conflict-guidance").textContent = setupConflictGuidanceText(setupConflict);
       const restoreButton = element<HTMLButtonElement>("restore-setup-definition");
       restoreButton.hidden = !setupConflict.canRestoreWithBackup;
       restoreButton.textContent = restoringSetup ? "Restoring…" : "Restore Journal’s version (keep backup)";
-      restoreButton.disabled = restoringSetup || switchingSetupCollection;
+      const busy = restoringSetup || switchingSetupCollection || recheckingSetup;
+      restoreButton.disabled = busy || !!setupConflictController;
       const switchButton = element<HTMLButtonElement>("switch-setup-collection");
       switchButton.hidden = state?.signIn?.state !== "paired";
       switchButton.textContent = switchingSetupCollection ? "Switching…" : "Switch collection";
-      switchButton.disabled = restoringSetup || switchingSetupCollection;
-      element<HTMLButtonElement>("cancel-setup-conflict").disabled = restoringSetup || switchingSetupCollection;
+      switchButton.disabled = busy;
+      const retrySetup = element<HTMLButtonElement>("retry-setup-conflict");
+      retrySetup.disabled = busy;
+      retrySetup.textContent = recheckingSetup ? "Checking…" : "Try again";
+      element<HTMLButtonElement>("cancel-setup-conflict").disabled = busy;
       const feedback = element("setup-conflict-feedback");
       feedback.hidden = !setupConflictFeedback;
       feedback.textContent = setupConflictFeedback ?? "";
@@ -517,15 +526,27 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     setupConflictController?.abort();
     const controller = new (document.defaultView?.AbortController ?? AbortController)();
     setupConflictController = controller;
-    void mdbase.setup.plan({signal: controller.signal}).then(plan => {
-      if (disposed || controller.signal.aborted || setupConflictController !== controller) return;
+    const signal = controller.signal;
+    const inspect = async () => {
+      const plan = await mdbase.setup.plan({signal});
+      const adopt = Object.fromEntries(Object.entries(plan.adoptable).filter(([target]) => !bundledSetupDefinitions().has(target)));
+      let staged = plan.staged;
+      if (plan.refusal?.code === "setup_conflict" && Object.keys(adopt).length) {
+        // A dry replan gives the exact staged document at Core's resolved path.
+        // It never applies the SDK's unbacked replacement.
+        try {staged = (await mdbase.setup.plan({adopt, signal})).staged;} catch {/* Unknown paths stay manual. */}
+      }
       const currentPhase = snapshot()?.phase;
-      if (currentPhase?.kind !== "needs_setup" || currentPhase.collectionId !== collectionId) return;
-      setupConflict = inspectSetupConflicts(plan, collectionId, mdbase.connection(collectionId));
-      render();
-    }, () => {
+      if (signal.aborted || currentPhase?.kind !== "needs_setup" || currentPhase.collectionId !== collectionId) return;
+      setupConflict = inspectSetupConflicts(plan, collectionId, mdbase.connection(collectionId), staged);
+    };
+    void inspect().catch(() => {
       if (disposed || controller.signal.aborted || setupConflictController !== controller) return;
-      setupConflict = null;
+      // An existing review stays in place if a recheck fails.
+      if (setupConflict) setupConflictFeedback = "Could not check setup right now. Try again.";
+    }).finally(() => {
+      if (disposed || controller.signal.aborted || setupConflictController !== controller) return;
+      setupConflictController = null;
       render();
     });
   }
@@ -544,7 +565,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       setupConflictCollectionId = currentPhase.collectionId;
       setupConflictChecking = checking;
       if (entered) {setupConflict = null; setupConflictFeedback = null;}
-      if ((entered || settled) && !restoringSetup) inspectSetupPlan(currentPhase.collectionId);
+      if ((entered || settled) && !restoringSetup && !recheckingSetup) inspectSetupPlan(currentPhase.collectionId);
     } else {
       setupConflictController?.abort();
       setupConflictController = null;
@@ -674,13 +695,18 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   });
   listen(element("restore-setup-definition"), "click", () => {
     const active = setupConflict;
-    if (!mdbase || disposed || restoringSetup || switchingSetupCollection || !active?.canRestoreWithBackup) return;
+    if (!mdbase || disposed || setupConflictController || restoringSetup || switchingSetupCollection || recheckingSetup || !active?.canRestoreWithBackup) return;
     restoringSetup = true; setupConflictFeedback = null; setupConflictNotice = null; render();
-    void restoreSetupDefinitions(mdbase, active.collectionId, active.restorable.map(item => item.target), {signal: caller.signal}).then(result => {
+    void restoreSetupDefinitions(mdbase, active.collectionId, active.restorable, {signal: caller.signal}).then(async result => {
       if (disposed) return;
       const confirmation = restoreConfirmationText(result);
       setupConflictNotice = confirmation;
       setupConflictFeedback = confirmation;
+      try {await mdbase.assess({signal: caller.signal});}
+      catch {
+        setupConflictNotice = `${confirmation} Journal could not recheck setup. Open Settings to try again.`;
+        setupConflictFeedback = setupConflictNotice;
+      }
     }, error => {
       if (disposed) return;
       setupConflictFeedback = error instanceof Error && error.message.trim() ? error.message : "Could not restore Journal’s definition. Your file was left unchanged.";
@@ -692,8 +718,19 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
       render();
     });
   });
+  listen(element("retry-setup-conflict"), "click", () => {
+    const active = setupConflict;
+    if (!mdbase || !active || disposed || restoringSetup || switchingSetupCollection || recheckingSetup) return;
+    recheckingSetup = true; setupConflictFeedback = null; render();
+    void mdbase.assess({signal: caller.signal}).then(() => {
+      const phase = snapshot()?.phase;
+      if (!disposed && phase?.kind === "needs_setup" && phase.collectionId === active.collectionId) inspectSetupPlan(active.collectionId);
+    }, () => {
+      if (!disposed && setupConflict === active) setupConflictFeedback = "Could not check setup right now. Try again.";
+    }).finally(() => {recheckingSetup = false; render();});
+  });
   listen(element("switch-setup-collection"), "click", () => {
-    if (!mdbase || disposed || restoringSetup || switchingSetupCollection) return;
+    if (!mdbase || disposed || restoringSetup || switchingSetupCollection || recheckingSetup) return;
     switchingSetupCollection = true; setupConflictFeedback = null; render();
     void mdbase.chooseAnother({signal: caller.signal}).catch(error => {
       if (disposed) return;
@@ -707,7 +744,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     });
   });
   listen(element("cancel-setup-conflict"), "click", () => {
-    if (disposed || restoringSetup || switchingSetupCollection) return;
+    if (disposed || restoringSetup || switchingSetupCollection || recheckingSetup) return;
     setupConflictNotice = null;
     setupConflictFeedback = null;
     if (menu.open) menu.close();

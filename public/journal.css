@@ -29,7 +29,6 @@ textarea { display:block; width:100%; max-width:680px; min-height:100vh; min-hei
 .dot.saved { background:var(--accent); } .dot.pending { background:var(--warn); }
 .status,.hint { background:var(--bg); }
 .status.routine span { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
-.status.notice { opacity:.55; } .status.notice:hover,.status.notice:focus-visible { opacity:1; }
 body.quiet .status.notice:not(:focus-visible) { opacity:0; pointer-events:none; }
 .hint { opacity:0; transition:opacity .6s ease; white-space:nowrap; border-radius:6px; }
 body.typing:not(.quiet) .hint,body.undo .hint,body.retry .hint,.hint:focus-within { opacity:1; }
@@ -68,6 +67,7 @@ body.typing:not(.quiet) .hint,body.undo .hint,body.retry .hint,.hint:focus-withi
 .setup-recovery-actions button.primary { border-color:var(--accent); background:var(--accent); color:var(--panel); font-weight:500; }
 .setup-recovery-actions button.primary:hover { color:var(--panel); opacity:.92; }
 .setup-recovery-notice { margin:0; padding-left:10px; border-left:2px solid var(--accent); overflow-wrap:anywhere; color:var(--ink); }
+#collection-panel[data-journal-recovery] .mdbase-collections-setup { display:none; }
 #returning-user-notice { display:grid; grid-template-columns:minmax(0,1fr); gap:.5rem; width:min(680px,calc(100% - 32px)); margin:5rem auto 0; padding:1rem 0; border-bottom:1px solid var(--faint); color:var(--muted); line-height:1.5; overflow-wrap:anywhere; }
 #returning-user-notice p { min-width:0; margin:0; }
 #returning-user-notice>div { display:flex; flex-wrap:wrap; gap:1rem; }
