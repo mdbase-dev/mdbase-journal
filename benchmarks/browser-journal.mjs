@@ -2,24 +2,29 @@ import assert from "node:assert/strict";
 import {readFile} from "node:fs/promises";
 import {createRequire} from "node:module";
 import {fileURLToPath} from "node:url";
+import {resolve} from "node:path";
 import {build} from "esbuild";
 
 const require = createRequire(new URL("../tools/smoke/package.json", import.meta.url));
 const {chromium} = require("playwright");
-const root = new URL("../", import.meta.url);
-const html = await readFile(new URL("public/index.html", root), "utf8");
-const bundle = await build({entryPoints: [fileURLToPath(new URL("benchmarks/browser-fixture.mjs", root))],
-  bundle: true, write: false, format: "iife", globalName: "JournalFixture", define: {"process.env.NODE_ENV": '"production"'}});
-const styles = await build({entryPoints: [fileURLToPath(import.meta.resolve("@mdbase-dev/ui/collections.css"))], bundle: true, write: false});
-const assets = new Map([
-  ["/", ["text/html", html]],
-  ["/journal.js", ["text/javascript", bundle.outputFiles[0].text + "\nglobalThis.JournalFixture = JournalFixture;"]],
-  ["/mdbase-shell-register.js", ["text/javascript", ""]],
-  ["/journal.css", ["text/css", await readFile(new URL("public/journal.css", root), "utf8")]],
-  ["/mdbase-collections.css", ["text/css", styles.outputFiles[0].text]]
-]);
+const root = fileURLToPath(new URL("../", import.meta.url));
+const fixture = await readFile(new URL("./browser-fixture.mjs", import.meta.url), "utf8");
+async function assetsFor(directory) {
+  const bundle = await build({stdin: {contents: fixture, resolveDir: resolve(directory, "benchmarks")},
+    bundle: true, write: false, format: "iife", globalName: "JournalFixture", define: {"process.env.NODE_ENV": '"production"'}});
+  const packages = createRequire(resolve(directory, "package.json"));
+  const styles = await build({entryPoints: [packages.resolve("@mdbase-dev/ui/collections.css")], bundle: true, write: false});
+  return new Map([
+    ["/", ["text/html", await readFile(resolve(directory, "public/index.html"), "utf8")]],
+    ["/journal.js", ["text/javascript", bundle.outputFiles[0].text + "\nglobalThis.JournalFixture = JournalFixture;"]],
+    ["/mdbase-shell-register.js", ["text/javascript", ""]],
+    ["/journal.css", ["text/css", await readFile(resolve(directory, "public/journal.css"), "utf8")]],
+    ["/mdbase-collections.css", ["text/css", styles.outputFiles[0].text]]
+  ]);
+}
+const headAssets = await assetsFor(root);
 const browser = await chromium.launch();
-async function open(options = {}) {
+async function open(options = {}, assets = headAssets) {
   const page = await browser.newPage({timezoneId: "UTC", reducedMotion: "reduce", ...options});
   await page.route("**/*", route => {
     const url = new URL(route.request().url());
@@ -29,22 +34,26 @@ async function open(options = {}) {
   await page.goto("https://journal.test/");
   return page;
 }
-async function benchmark() {
+async function benchmark(base) {
+  const revisions = [{name: "head", assets: headAssets}];
+  if (base) revisions.unshift({name: "base", assets: await assetsFor(base)});
   for (const size of [5000, 10000]) {
-    const results = [];
+    const samples = new Map(revisions.map(({name}) => [name, []]));
     for (let i = 0; i <= 9; i++) {
-      const page = await open();
-      try {
-        const row = await page.evaluate(async size => {
-          const fixture = await JournalFixture.start(size);
-          return {startup: fixture.startup, ...await fixture.sample()};
-        }, size);
-        if (i) results.push(row);
-      } finally {await page.close();}
+      for (const revision of i % 2 ? revisions.toReversed() : revisions) {
+        const page = await open({}, revision.assets);
+        try {
+          const row = await page.evaluate(async size => {
+            const fixture = await JournalFixture.start(size);
+            return {startup: fixture.startup, ...await fixture.sample()};
+          }, size);
+          if (i) samples.get(revision.name).push(row);
+        } finally {await page.close();}
+      }
     }
-    for (const key of Object.keys(results[0])) {
-      const values = results.map(row => row[key]).sort((a, b) => a - b);
-      console.log(size, key, "median", values[4].toFixed(2), "p95", values[8].toFixed(2), "ms");
+    for (const [name, rows] of samples) for (const key of Object.keys(rows[0])) {
+      const values = rows.map(row => row[key]).sort((a, b) => a - b);
+      console.log(name, size, key, "median", values[4].toFixed(2), "p95", values[8].toFixed(2), "ms");
     }
   }
 }
@@ -109,6 +118,6 @@ async function audit() {
 try {
   console.log("Chromium", browser.version());
   if (process.argv[2] === "axe") await audit();
-  else if (process.argv[2] === "bench") await benchmark();
+  else if (process.argv[2] === "bench") await benchmark(process.argv[3]);
   else throw Error("Choose bench or axe");
 } finally {await browser.close();}

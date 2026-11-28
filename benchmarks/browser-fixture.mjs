@@ -6,7 +6,8 @@ import {mountJournal} from "../src/view.ts";
 const el = id => document.getElementById(id);
 const pastDate = "2010-01-01";
 const largeBody = "A line of journal writing.\n".repeat(2048);
-const pastId = "018e0000-0000-7000-8000-000000000001";
+const recordId = index => "018e0000-0000-7000-8000-" + (index + 1).toString(16).padStart(12, "0");
+const pastId = recordId(0);
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 async function until(check) {
   const deadline = performance.now() + 10000;
@@ -20,7 +21,7 @@ export async function start(size, recovery = false) {
   const type = "journal-bench-entry";
   const records = Array.from({length: size}, (_, index) => {
     const created = new Date(Date.UTC(2010, 0, index + 1, 12)).toISOString();
-    return {id: index ? String(index) : pastId, path: 'journal/' + created.slice(0, 10) + '.md',
+    return {id: recordId(index), path: 'journal/' + created.slice(0, 10) + '.md',
       types: [type], frontmatter: {created}};
   });
   const original = records[0];
