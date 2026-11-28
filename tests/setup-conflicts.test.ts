@@ -92,6 +92,28 @@ function needsSetupSnapshot(ready: Awaited<ReturnType<typeof applicationFixture>
   };
 }
 
+test("the collection panel footer stays in the scrollable Settings sheet during setup conflict", async () => {
+  const f = await applicationFixture();
+  const h = dom();
+  const {document} = h.window;
+  const style = document.createElement("style");
+  style.textContent = readFileSync(new URL("../public/journal.css", import.meta.url), "utf8");
+  document.head.append(style);
+  f.fixture.controls.setSetupPlan(nonAdoptablePlan());
+  f.fixture.controls.publishSnapshot({...needsSetupSnapshot(f.ready), links: {account: "https://fixture.example/account", manageAccess: "https://fixture.example/access"}});
+  const view = mountJournal(document, new JournalDrafts(memoryStorage()), f.mdbase);
+  try {
+    h.click("status-button");
+    const panelFooter = await until(() => h.menu.querySelector("#collection-panel footer") ?? undefined);
+    assert.equal(h.menu.open, true);
+    assert.match(panelFooter.textContent!, /Choose a different collection/);
+    assert.equal(panelFooter.querySelector("a")?.textContent, "Manage access");
+    assert.equal(h.window.getComputedStyle(document.querySelector("body > footer")!).position, "fixed");
+    assert.notEqual(h.window.getComputedStyle(panelFooter).position, "fixed");
+    assert.equal(h.window.getComputedStyle(h.menu).overflowY, "auto");
+  } finally {view.dispose(); h.window.close(); await f.fixture.close();}
+});
+
 test("backupPathFor produces safe non-record, non-resource backup paths", () => {
   const date = new Date("2026-11-27T08:30:15Z");
   const path = backupPathFor(CONTRACT_TARGET, date, "journal-setup-backups", "abc123");

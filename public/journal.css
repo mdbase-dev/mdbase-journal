@@ -6,14 +6,15 @@ html { scrollbar-width:none; scroll-padding-bottom:calc(5rem + env(safe-area-ins
 html::-webkit-scrollbar { display:none; }
 html,body { margin:0; }
 body { background:var(--bg); color:var(--ink); font:400 .875rem/1.4 Inter,system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
-header,footer { position:fixed; left:0; right:0; z-index:1; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px max(16px,env(safe-area-inset-left)) 14px max(16px,env(safe-area-inset-right)); color:var(--muted); font-size:.8125rem; transition:opacity .6s ease; }
+/* The collection panel has its own footer inside Settings. */
+body > :is(header,footer) { position:fixed; left:0; right:0; z-index:1; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px max(16px,env(safe-area-inset-left)) 14px max(16px,env(safe-area-inset-right)); color:var(--muted); font-size:.8125rem; transition:opacity .6s ease; }
 .context { min-width:0; display:flex; flex-wrap:wrap; align-items:center; gap:2px 10px; }
 #menu-button { min-width:44px; min-height:44px; }
-header { top:0; padding-top:max(14px,env(safe-area-inset-top)); background:linear-gradient(var(--bg) 55%,transparent); }
-footer { bottom:0; flex-wrap:wrap; padding-bottom:max(14px,env(safe-area-inset-bottom)); pointer-events:none; }
-footer>* { pointer-events:auto; }
-body.quiet header:not(:focus-within),body.quiet .hint:not(:focus-within) { opacity:0; pointer-events:none; }
-@media (hover:none),(pointer:coarse) { body.quiet header:not(:focus-within) { opacity:1; pointer-events:auto; } body.quiet header:not(:focus-within) .context { opacity:0; } body.quiet header:not(:focus-within) #menu-button { opacity:.4; } }
+body > header { top:0; padding-top:max(14px,env(safe-area-inset-top)); background:linear-gradient(var(--bg) 55%,transparent); }
+body > footer { bottom:0; flex-wrap:wrap; padding-bottom:max(14px,env(safe-area-inset-bottom)); pointer-events:none; }
+body > footer > * { pointer-events:auto; }
+body.quiet > header:not(:focus-within),body.quiet .hint:not(:focus-within) { opacity:0; pointer-events:none; }
+@media (hover:none),(pointer:coarse) { body.quiet > header:not(:focus-within) { opacity:1; pointer-events:auto; } body.quiet > header:not(:focus-within) .context { opacity:0; } body.quiet > header:not(:focus-within) #menu-button { opacity:.4; } }
 main { display:flex; justify-content:center; }
 textarea { display:block; width:100%; max-width:680px; min-height:100vh; min-height:100dvh; overflow:hidden; padding:16vh 16px 40vh; border:0; outline:0; resize:none; background:transparent; color:var(--ink); caret-color:var(--caret); font:400 1.3125rem/1.6 Newsreader,Georgia,serif; font-optical-sizing:auto; }
 /* The shared UI rings every :focus-visible element; the writing page is the focus itself. */
@@ -35,6 +36,7 @@ body.typing:not(.quiet) .hint,body.undo .hint,body.retry .hint,.hint:focus-withi
 .hint button { min-height:44px; } #retry-button { margin:-6px 8px -6px -8px; color:var(--accent); } .count { margin-right:16px; font-variant-numeric:tabular-nums; }
 @media (max-width:520px) { .hint .keys { display:none; } }
 #menu,#entries { border:1px solid var(--faint); background:var(--panel); color:var(--ink); border-radius:12px; padding:0; width:min(420px,calc(100vw - 32px)); box-shadow:0 20px 60px rgb(0 0 0 / .18); }
+#menu { inset-block:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-bottom)); max-height:calc(100% - 32px); max-height:calc(100dvh - max(16px,env(safe-area-inset-top)) - max(16px,env(safe-area-inset-bottom))); overflow-y:auto; overscroll-behavior:contain; }
 #menu::backdrop,#entries::backdrop { background:rgb(0 0 0 / .25); }
 .context nav { display:flex; align-items:center; gap:8px; min-width:0; }
 .context nav h1 { margin:0; min-width:0; font:inherit; }

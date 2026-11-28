@@ -37,6 +37,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   };
   const page = element<HTMLTextAreaElement>("page");
   const menu = element<HTMLDialogElement>("menu");
+  const copyFeedback = element("deleted-copy-feedback");
   const typeChoice = element<HTMLSelectElement>("entry-type");
   const status = element("status");
   const pending = element("pending-count");
@@ -69,6 +70,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   let inputEpoch = 0;
   let displayedRecordRevision: string | null = null;
   let conflicted = false;
+  let deletedCopyFeedback = "";
   const retrying = new Set<string>();
   const edited = new Set<string>();
   const preferences = drafts.preferences();
@@ -156,6 +158,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   }
   let renderedDraftId = current.id;
   function renderPage(): void {
+    deletedCopyFeedback = "";
     if (renderedDraftId !== current.id) conflicted = false;
     renderedDraftId = current.id;
     displayedRecordRevision = data?.snapshot(current.id)?.record.revision ?? null;
@@ -187,7 +190,11 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     conflicted = conflicted || current.reviewRequired === true || observed?.state === "conflict";
     element("draft-conflict").hidden = !conflicted && !current.deletedElsewhere;
     element("draft-conflict").setAttribute("aria-label", current.deletedElsewhere ? "Deleted entry" : "Conflicting note");
-    element("draft-conflict").querySelector("p")!.textContent = current.deletedElsewhere ? `${DELETED_ENTRY_NOTICE} Copy it to keep writing in a new page.` : "This note changed elsewhere. Copy your text before using the saved version.";
+    element("draft-conflict").querySelector("p")!.textContent = current.deletedElsewhere ? DELETED_ENTRY_NOTICE : "This note changed elsewhere. Copy your text before using the saved version.";
+    if (!current.deletedElsewhere) deletedCopyFeedback = "";
+    copyFeedback.hidden = !deletedCopyFeedback;
+    if (copyFeedback.textContent !== deletedCopyFeedback) copyFeedback.textContent = deletedCopyFeedback;
+    element("start-new-after-deletion").hidden = !current.deletedElsewhere;
     element("use-saved-version").hidden = !!current.deletedElsewhere;
     element<HTMLButtonElement>("use-saved-version").disabled = !!current.deletedElsewhere || current.reviewRequired === true && !data;
     if (entriesDialog.open) renderEntries();
@@ -276,7 +283,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     typeChoice.replaceChildren(option("Choose a type…", ""), ...types.map(item => option(item.name, item.name)));
     typeChoice.value = type?.name ?? "";
     element("type-row").hidden = types.length < 2;
-    element("new-button").hidden = !current.body.trim();
+    element("new-button").hidden = !current.body.trim() || !!current.deletedElsewhere;
     element("undo-button").hidden = !undoId;
     const retryCurrent = recovering(current.id), retryElement = element<HTMLButtonElement>("retry-button");
     retryElement.hidden = !retryCurrent; retryButton(retryElement, current.id);
@@ -310,7 +317,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     element("word-count").hidden = words === 0;
   }
   function newPage(): void {transaction(() => {
-    if (!current.body.trim()) {page.focus(); return;}
+    if (!current.body.trim() && !current.deletedElsewhere) {page.focus(); return;}
     if (memoryOnly) {problem = "Keep this page open: its text has not been preserved on this device."; render(); return;}
     const previous = current;
     try {
@@ -562,6 +569,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   }
   listen(page, "input", () => {
     clearUndo();
+    deletedCopyFeedback = "";
     const body = page.value, base = current, wasUnpersisted = unpersistedDraft, owned = data;
     const source = {body: base.body, revision: displayedRecordRevision}, epoch = ++inputEpoch;
     current = {...base, body, revision: draftRevision(body)};
@@ -591,6 +599,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   if (viewport) listen(viewport, "resize", () => document.defaultView?.requestAnimationFrame(revealCaret));
   listen(document, "keydown", event => {const key = event as KeyboardEvent; if ((key.ctrlKey || key.metaKey) && key.key === "Enter" && key.target === page && !document.querySelector("dialog[open]")) {key.preventDefault(); newPage();}});
   listen(element("new-button"), "click", newPage);
+  listen(element("start-new-after-deletion"), "click", newPage);
   listen(element("undo-button"), "click", undoNewPage);
   listen(element("retry-button"), "click", () => retry(current.id));
   let menuOpener: HTMLElement | null = null;
@@ -669,10 +678,22 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   applyTheme();
   const unlistenApp = mdbase?.subscribe(() => transaction(changed)) ?? (() => {});
   if (document.defaultView) for (const name of ["online", "offline"]) listen(document.defaultView, name, render);
-  listen(element("copy-conflicting-text"), "click", () => {
+  listen(element("copy-conflicting-text"), "click", async () => {
     const clipboard = document.defaultView?.navigator.clipboard;
-    if (!clipboard) {page.focus(); page.select(); problem = current.deletedElsewhere ? "Your text is selected. Copy it before starting a new page." : "Your text is selected. Copy it before using the saved version."; render(); return;}
-    void clipboard.writeText(page.value).then(() => {problem = current.deletedElsewhere ? "Text copied. Start a new page to keep writing." : "Text copied. You can now use the saved version."; render();}, () => {page.focus(); page.select(); problem = current.deletedElsewhere ? "Copy your selected text before starting a new page." : "Copy your selected text before using the saved version."; render();});
+    const id = current.id, epoch = inputEpoch, body = page.value;
+    let copied = false;
+    if (clipboard) {
+      try {await clipboard.writeText(body); copied = true;}
+      catch {/* Clipboard access can be denied. Select the text for manual copying. */}
+    }
+    if (disposed || current.id !== id || inputEpoch !== epoch || page.value !== body) return;
+    if (!copied) {page.focus(); page.select();}
+    if (current.deletedElsewhere) {
+      deletedCopyFeedback = copied ? "Text copied." : "Your text is selected. Copy it before starting a new page.";
+    } else {
+      problem = copied ? "Text copied. You can now use the saved version." : "Your text is selected. Copy it before using the saved version.";
+    }
+    render();
   });
   listen(element("use-saved-version"), "click", () => {
     const id = current.id, chosenEpoch = inputEpoch;

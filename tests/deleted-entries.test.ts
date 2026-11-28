@@ -77,7 +77,8 @@ for (const body of ["Unsaved local text", ""]) test(`a deleted record retains an
     assert.equal(window.document.getElementById("draft-conflict")!.hidden, false);
     assert.equal(window.document.getElementById("use-saved-version")!.hidden, true);
     window.document.getElementById("copy-conflicting-text")!.click();
-    assert.match(window.document.getElementById("status")!.textContent!, /Copy it before starting a new page/);
+    assert.match(window.document.getElementById("draft-conflict")!.textContent!, /Your text is selected\. Copy it before starting a new page/);
+    assert.match(window.document.getElementById("status")!.textContent!, /deleted elsewhere.*text.*device/i);
     assert.equal(drafts.get(draft.id)?.savedBody, "Saved entry");
     view.dispose(); window.close();
     window = windowForJournal(); view = mountJournal(window.document, new JournalDrafts(storage), h.mdbase);
@@ -223,6 +224,18 @@ test("a queued autosave rejected as deleted offers to copy the unsaved text with
     assert.equal(window.document.getElementById("use-saved-version")!.hidden, true);
     window.document.getElementById("copy-conflicting-text")!.click();
     assert.equal(await copied.promise, unsaved);
+    await until(() => !!recovery.textContent?.includes("Text copied"));
+    assert.equal(recovery.hidden, false);
+    assert.match(recovery.textContent!, /deleted elsewhere.*text.*device/i);
+    assert.match(status.textContent!, /deleted elsewhere.*text.*device/i);
+    assert.match(window.document.getElementById("status-button")!.getAttribute("aria-label")!, /^Journal settings\./);
+    const startNew = recovery.querySelector<HTMLButtonElement>("#start-new-after-deletion")!;
+    assert.equal(startNew.hidden, false);
+    startNew.click();
+    await until(() => view.currentDraft().id !== draft.id);
+    assert.equal(recovery.hidden, true);
+    assert.equal(page.value, "");
+    assert.equal(drafts.get(draft.id)?.body, unsaved);
     assert.equal(await h.records.find(recordId), null);
     assert.equal(update.mock.callCount(), 1);
     assert.equal(create.mock.callCount(), 0);
