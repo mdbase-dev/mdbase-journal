@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import {test} from "node:test";
+import {mock, test} from "node:test";
+import {JournalData} from "../src/journal-data.js";
 import {readFileSync} from "node:fs";
 import {JSDOM} from "jsdom";
 import {DraftConflictError, DraftPersistenceError, JournalDrafts, type DraftLock} from "../src/drafts.js";
@@ -111,4 +112,22 @@ test("rapid queued input retains every character without a false self-conflict",
     assert.equal(h.page.value, "abc"); assert.equal(drafts.get(view.currentDraft().id)?.body, "abc");
     assert.equal(h.window.document.getElementById("draft-conflict")!.hidden, true);
   } finally {view.dispose(); h.window.close();}
+});
+
+test("a refused session update keeps the durable draft and reports the refusal without an outside-edit banner", async () => {
+  const f = await applicationFixture(), drafts = new JournalDrafts(memoryStorage()), h = host();
+  const view = mountJournal(h.window.document, drafts, f.mdbase);
+  try {
+    h.write("Original");
+    for (let i = 0; i < 100 && !view.currentDraft().recordId; i++) await tick();
+    assert(view.currentDraft().recordId);
+    const refusal = mock.method(JournalData.prototype, "setBody", async () => {throw new DraftPersistenceError();});
+    try {
+      h.write("My later writing"); await tick();
+      assert.equal(refusal.mock.callCount(), 1);
+      assert.equal(drafts.get(view.currentDraft().id)?.body, "My later writing");
+      assert.match(h.window.document.getElementById("status")!.textContent!, /keep this page open/i);
+      assert.equal(h.window.document.getElementById("draft-conflict")!.hidden, true);
+    } finally {refusal.mock.restore();}
+  } finally {view.dispose(); h.window.close(); f.close();}
 });

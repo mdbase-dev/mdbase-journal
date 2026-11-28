@@ -5,7 +5,7 @@ import {JSDOM} from "jsdom";
 import {JournalDrafts, type DraftLock} from "../src/drafts.js";
 import {mountJournal} from "../src/view.js";
 import {JournalData, journalEntryTypes} from "../src/journal-data.js";
-import {applicationFixture, catalog, memoryStorage} from "./support.js";
+import {applicationFixture, catalog, memoryLocks, memoryStorage} from "./support.js";
 for (const offline of [false, true]) test(`a delayed storage echo cannot replace newer persisted text or send its prefix to the SDK (${offline ? "offline" : "online"})`, async () => {
   const f = await applicationFixture(), drafts = new JournalDrafts(memoryStorage(), undefined, serialLock());
   const draft = await drafts.mutate(() => drafts.put({...drafts.blank(f.connection.id), body: "Seed", path: "echo.md"}));
@@ -63,4 +63,58 @@ test("fast offline input through the origin lock keeps its complete text after r
     await until(() => status.textContent === "Saved");
     assert.equal((await f.records.get(drafts.get(view.currentDraft().id)!.recordId!, {include: {body: true}})).body, expected);
   } finally {view.dispose(); window.close(); f.close();}
+});
+
+test("two days edited without a connection reopen and save to their original records, including a cleared entry", async () => {
+  const f = await applicationFixture(), drafts = new JournalDrafts(memoryStorage());
+  const {window} = new JSDOM(html, {url: "https://journal.fixture/"});
+  const {document} = window, page = document.querySelector<HTMLTextAreaElement>("#page")!;
+  const dialog = document.querySelector<HTMLDialogElement>("#entries")!;
+  dialog.showModal = () => dialog.setAttribute("open", "");
+  dialog.close = () => dialog.removeAttribute("open");
+  const data = new JournalData(f.connection, drafts);
+  async function original(day: number, body: string) {
+    const draft = drafts.put({...drafts.blank(f.connection.id, new Date(2026, 0, day, 12)), path: `journal/day-${day}.md`, body});
+    await data.open(draft.id, journalEntryTypes(catalog())[0]);
+    return drafts.get(draft.id)!;
+  }
+  async function write(body: string) {
+    page.value = body;
+    page.dispatchEvent(new window.Event("input", {bubbles: true}));
+    await Promise.resolve();
+  }
+  function select(id: string) {
+    document.getElementById("browse-button")!.click();
+    const row = document.querySelector<HTMLButtonElement>(`#entry-list button[data-entry-id="${id}"]`);
+    assert(row); row.click();
+    assert.equal(dialog.open, false);
+  }
+  let view;
+  try {
+    const first = await original(1, "First saved body"), second = await original(2, "Second saved body");
+    data.release();
+    f.replica.setOnline(false);
+    view = mountJournal(document, drafts, null);
+    select(first.id); await write("Local first body");
+    select(second.id); await write("");
+    select(first.id); assert.equal(page.value, "Local first body");
+    select(second.id); assert.equal(page.value, "");
+    assert.equal(document.getElementById("pending-count")!.textContent?.startsWith("2 notes"), true);
+    view.dispose();
+    view = mountJournal(document, drafts, null);
+    assert.equal(view.currentDraft().id, second.id);
+    assert.equal(page.value, "");
+    assert.equal(document.getElementById("draft-conflict")!.hidden, true);
+    view.dispose();
+    f.replica.setOnline(true);
+    // The browser's Web Locks allow replay for a background draft as well.
+    Object.defineProperty(window.navigator, "locks", {value: memoryLocks()});
+    view = mountJournal(document, drafts, f.mdbase);
+    await until(() => drafts.get(second.id)?.savedBody === "" && drafts.get(first.id)?.savedBody === "Local first body");
+    for (const [draft, expected] of [[first, "Local first body"], [second, ""]] as const) {
+      assert.equal(drafts.get(draft.id)?.reviewRequired, undefined);
+      assert.equal((await f.records.get(draft.recordId!, {include: {body: true}})).body, expected);
+    }
+    assert.equal(document.getElementById("draft-conflict")!.hidden, true);
+  } finally {view?.dispose(); data.release(); window.close(); f.close();}
 });

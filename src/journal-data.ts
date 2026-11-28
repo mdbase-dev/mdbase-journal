@@ -1,5 +1,5 @@
 import {revisionOf, uuidv7, type DescribeResult, type MdbaseApplicationConnection, type RecordLease, type RecordSessionSnapshot, type RecordView, type FileRef} from "@mdbase-dev/sdk";
-import {JournalDrafts, type JournalDraft} from "./drafts.js";
+import {hasDraftContent, JournalDrafts, type JournalDraft} from "./drafts.js";
 export const JOURNAL_CONTRACT = Object.freeze({id: "journal.entry", version: "0.1.0", digest: "sha256:7e95bdf03621919fb0e722e5a29b48a68d7a4eaa3a94aea033d96ea2f7ec34cc"});
 export interface JournalEntryType {readonly name: string; readonly createdField: string}
 export interface JournalEntry {readonly id: string; readonly created: string; readonly createdMs: number; readonly path: string}
@@ -158,7 +158,7 @@ export class JournalData {
   }
   private async acquire(id: string, type?: JournalEntryType): Promise<RecordLease> {
     let draft = this.drafts.get(id);
-    if (!draft || !draft.path || (!draft.recordId && !draft.body.trim())) throw new Error("Write something before saving this page.");
+    if (!draft || !draft.path || !hasDraftContent(draft)) throw new Error("Write something before saving this page.");
     this.ensure(draft);
     if (!draft.targetCollectionId) draft = await this.drafts.mutate(() => this.drafts.patch(id, {targetCollectionId: this.connection.id}));
     if (!draft.recordId) {

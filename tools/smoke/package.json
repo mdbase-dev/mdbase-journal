@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "dependencies": {
+    "axe-core": "4.11.0",
     "playwright": "1.61.1"
   }
 }

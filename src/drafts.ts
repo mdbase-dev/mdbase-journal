@@ -37,6 +37,10 @@ export interface JournalDraft {
   /** Prototype text has no original native capture identity. Import is local only. */
   legacyKey?: string;
 }
+/** Empty text is a real edit once a page has an original save identity. */
+export function hasDraftContent(draft: JournalDraft): boolean {
+  return !!draft.recordId || !!draft.createAttempt || !!draft.body.trim();
+}
 export type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem" | "key" | "length">;
 const prefix = "journal.native.note.";
 const object = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
