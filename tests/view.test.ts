@@ -42,11 +42,13 @@ test("the ready writing page has one level-one heading naming the current journa
   const h = dom(), f = await applicationFixture();
   const view = mountJournal(h.window.document, new JournalDrafts(memoryStorage()), f.mdbase);
   try {
+    await until(() => h.window.document.getElementById("menu-connection")!.textContent === "Notes save to Writing.");
     const headings = h.window.document.querySelectorAll("h1");
     assert.equal(headings.length, 1);
     const date = h.window.document.querySelector("#browse-button")!.textContent!.trim();
     assert.ok(date);
     assert.equal(headings[0]!.textContent!.trim(), date);
+    assert.equal(headings[0]!.querySelector("#browse-button")?.getAttribute("aria-controls"), "entries");
     assert.equal(headings[0]!.closest("dialog, [hidden], [aria-hidden=true]"), null);
   } finally {view.dispose(); f.close(); h.window.close();}
 });

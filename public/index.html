@@ -33,7 +33,9 @@
   <textarea id="page" aria-label="Note" spellcheck="true" autocapitalize="sentences"></textarea>
   <section id="draft-conflict" hidden aria-label="Conflicting note" aria-live="polite">
     <p>This note changed elsewhere. Copy your text before using the saved version.</p>
+    <p id="deleted-copy-feedback" hidden></p>
     <button id="copy-conflicting-text" type="button">Copy my text</button>
+    <button id="start-new-after-deletion" type="button" hidden>Start a new page</button>
     <button id="use-saved-version" type="button">Use saved version</button>
   </section>
 </main>
