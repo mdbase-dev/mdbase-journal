@@ -1,6 +1,7 @@
 import {
   describeError,
   isMdbaseError,
+  revisionOf,
   type Mdbase,
   type MdbaseApplicationConnection,
   type MdbaseSetupConflict,
@@ -15,10 +16,14 @@ export interface BundledSetupDefinition {
   readonly document: string;
 }
 
+interface ReviewedSetupDefinition extends BundledSetupDefinition {
+  readonly reviewedRevision?: string;
+}
+
 export interface SetupConflictGuidance {
   readonly collectionId: string;
   readonly conflicts: readonly MdbaseSetupConflict[];
-  readonly restorable: readonly BundledSetupDefinition[];
+  readonly restorable: readonly ReviewedSetupDefinition[];
   readonly manualOnly: readonly MdbaseSetupConflict[];
   readonly canRestoreWithBackup: boolean;
   readonly backupFolder: string | null;
@@ -77,28 +82,28 @@ export function backupFolderFor(connection: MdbaseApplicationConnection | null):
   return allowed ? `${allowed}/${DEFAULT_BACKUP_FOLDER}` : null;
 }
 
-/** Non-adoptable setup conflicts that leave the shared setup review stuck at only "Try again". */
+/** Match a remapped target only when Core's review stages Journal's exact bytes there. */
 export function inspectSetupConflicts(
   plan: MdbaseSetupPlan,
   collectionId: string,
   connection: MdbaseApplicationConnection | null,
+  staged: MdbaseSetupPlan["staged"] = plan.staged,
 ): SetupConflictGuidance | null {
   if (plan.canApply || plan.conflicts.length === 0) return null;
-  if (plan.refusal?.code === "setup_forbidden" || plan.refusal?.code === "installed_newer") return null;
-  const conflicts = plan.conflicts.filter(
-    conflict => !conflict.adoptable && !Object.hasOwn(plan.adoptable, conflict.target),
-  );
-  if (conflicts.length === 0) return null;
+  if (plan.refusal?.code === "installed_newer" || plan.refusal?.code === "setup_downgrade") return null;
+  const conflicts = plan.conflicts;
   const bundled = bundledSetupDefinitions();
-  const restorable: BundledSetupDefinition[] = [];
+  const restorable: ReviewedSetupDefinition[] = [];
   const manualOnly: MdbaseSetupConflict[] = [];
   for (const conflict of conflicts) {
-    const definition = bundled.get(conflict.target);
-    if (definition) restorable.push(definition);
+    const stagedDocument = staged.find(item => item.path === conflict.target)?.document;
+    const definition = bundled.get(conflict.target) ?? [...bundled.values()].find(item => item.document === stagedDocument);
+    const reviewedRevision = conflict.adoptable?.digest ?? (Object.hasOwn(plan.adoptable, conflict.target) ? plan.adoptable[conflict.target] : undefined);
+    if (definition) restorable.push({...definition, target: conflict.target, ...(reviewedRevision ? {reviewedRevision} : {})});
     else manualOnly.push(conflict);
   }
   const live = connection !== null && connection.id === collectionId && connection.isCurrent();
-  const canManage = live && connection.records.hello.grant.capabilities.includes("definitions.manage");
+  const canManage = live && plan.refusal?.code !== "setup_forbidden" && connection.records.hello.grant.capabilities.includes("definitions.manage");
   const backupFolder = live ? backupFolderFor(connection) : null;
   const canRestoreWithBackup = restorable.length > 0 && canManage && backupFolder !== null;
   const unavailableReason: SetupConflictGuidance["unavailableReason"] =
@@ -196,9 +201,9 @@ function errorDetail(error: unknown, fallback: string): string {
  * Never overwrites a hand-edited file if saving its backup fails.
  */
 export async function restoreSetupDefinitions(
-  mdbase: Pick<Mdbase, "connection" | "assess">,
+  mdbase: Pick<Mdbase, "connection">,
   collectionId: string,
-  targets: readonly string[],
+  definitions: readonly ReviewedSetupDefinition[],
   options: RestoreSetupOptions = {},
 ): Promise<RestoreSetupResult> {
   const connection = mdbase.connection(collectionId);
@@ -212,69 +217,57 @@ export async function restoreSetupDefinitions(
   if (!backupFolder) {
     throw new Error("Journal can't save a backup copy in this collection, so nothing was overwritten.");
   }
-  const bundled = bundledSetupDefinitions();
   const encoder = new TextEncoder();
   const now = options.now ?? (() => new Date());
   const readOptions = options.signal ? { signal: options.signal } : undefined;
   const restored: RestoredSetupDefinition[] = [];
 
-  for (const target of targets) {
+  for (const canonical of definitions) {
+    const {target, reviewedRevision} = canonical;
     options.signal?.throwIfAborted();
-    const canonical = bundled.get(target);
-    if (!canonical) {
-      throw new Error(`Journal does not ship a definition for ${target}. Resolve it by hand.`);
-    }
-    let existing: { text: string; revision: string } | null = null;
+    let existing: { text: string; revision: string };
     try {
       const view = await connection.records.resources.get(target, readOptions);
-      if (typeof view.text !== "string") {
+      if (view.path !== target || typeof view.text !== "string" || revisionOf(view.text) !== view.revision) {
         throw new Error(`Could not read the current contents of ${target}, so Journal left your file unchanged.`);
       }
       existing = { text: view.text, revision: view.revision };
     } catch (error) {
-      if (!isMdbaseError(error, "not_found")) {
-        throw new Error(`Could not read ${target} before restoring: ${errorDetail(error, "nothing was changed.")}`);
-      }
+      throw new Error(`Could not read ${target} before restoring: ${errorDetail(error, "nothing was changed.")}`);
     }
     if (!connection.isCurrent()) {
       throw new Error("This collection changed while restoring. Nothing further was changed.");
     }
-    if (existing && existing.text === canonical.document) {
+    if (existing.text === canonical.document) {
       restored.push(Object.freeze({ target, backupPath: null, unchanged: true }));
       continue;
     }
 
-    let backupPath: string | null = null;
-    if (existing) {
-      backupPath = backupPathFor(target, now(), backupFolder, options.suffix?.());
-      try {
-        const upload = await connection.files.upload(
-          backupPath,
-          encoder.encode(existing.text),
-          options.signal ? { signal: options.signal } : undefined,
-        );
-        await upload.confirmed;
-      } catch (error) {
-        throw new Error(
-          `Could not save a backup copy of ${target} (${errorDetail(error, "backup failed")}), so Journal left your file unchanged.`,
-        );
-      }
-      if (!connection.isCurrent()) {
-        throw new Error(`This collection changed after saving your backup at ${backupPath}. Your original file was left unchanged.`);
-      }
+    if (reviewedRevision && existing.revision !== reviewedRevision) {
+      throw new Error(`${target} changed since setup was reviewed. Choose Try again to review the current file.`);
+    }
+    const backupPath = backupPathFor(target, now(), backupFolder, options.suffix?.());
+    try {
+      const upload = await connection.files.upload(backupPath, encoder.encode(existing.text), readOptions);
+      await upload.confirmed;
+    } catch (error) {
+      throw new Error(
+        `Could not save a backup copy of ${target} (${errorDetail(error, "backup failed")}), so Journal left your file unchanged.`,
+      );
+    }
+    if (!connection.isCurrent()) {
+      throw new Error(`This collection changed after saving your backup at ${backupPath}. Your original file was left unchanged.`);
     }
 
     try {
       const write = await connection.records.resources.put(
         target,
         canonical.document,
-        existing
-          ? { baseRevision: existing.revision, ...(options.signal ? { signal: options.signal } : {}) }
-          : { mustNotExist: true, ...(options.signal ? { signal: options.signal } : {}) },
+        { baseRevision: existing.revision, ...(options.signal ? { signal: options.signal } : {}) },
       );
       await write.confirmed;
     } catch (error) {
-      const backupNote = backupPath ? ` Your backup copy was saved to ${backupPath}.` : "";
+      const backupNote = ` Your backup copy was saved to ${backupPath}.`;
       if (isMdbaseError(error, "conflict")) {
         throw new Error(`${target} changed while restoring, so Journal didn't overwrite it.${backupNote} Try again.`);
       }
@@ -284,6 +277,5 @@ export async function restoreSetupDefinitions(
     restored.push(Object.freeze({ target, backupPath, unchanged: false }));
   }
 
-  await mdbase.assess(options.signal ? { signal: options.signal } : undefined);
   return Object.freeze({ restored: Object.freeze(restored) });
 }
