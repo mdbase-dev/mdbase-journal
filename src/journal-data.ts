@@ -4,6 +4,17 @@ export const JOURNAL_CONTRACT = Object.freeze({id: "journal.entry", version: "0.
 export interface JournalEntryType {readonly name: string; readonly createdField: string}
 export interface JournalEntry {readonly id: string; readonly created: string; readonly createdMs: number; readonly path: string}
 export const DELETED_ENTRY_NOTICE = "This entry was deleted elsewhere. Your text stays on this device.";
+const EDITED_ENTRY_NOTICE = "This note changed elsewhere. Your local text has been preserved.";
+function witnessedSave(snapshot: RecordSessionSnapshot, capture?: {mutationId: string; body: string}): boolean {
+  const receipt = snapshot.lastReceipt;
+  return !!capture && snapshot.record.body === capture.body && receipt?.mutation === capture.mutationId &&
+    (receipt.state === "confirmed" || receipt.state === "pending") && receipt.status !== "conflicted" &&
+    !!receipt.records?.some(record => record.id === snapshot.record.id && record.revision === snapshot.record.revision);
+}
+function matchesDraftBase(draft: JournalDraft, record: RecordView): boolean {
+  return record.revision === draft.pendingRecordRevision || record.body === draft.savedBody &&
+    (!draft.savedRecordRevision || record.revision === draft.savedRecordRevision);
+}
 /** The collection's catalog cannot give Journal an entry type. SDK readiness
  * checks only that the contract exists and some type claims it; these are the
  * further bindings Journal needs. The message is shown to the writer. */
@@ -120,8 +131,11 @@ export class JournalData {
     if (local) return local;
     const record = await this.connection.records.get(entry.id, {include: {body: true, document: true}, signal: this.caller.signal});
     this.ensure(); currentRecord(record, entry.id);
+    const confirmed = record.state.state === "confirmed";
     const draft = await this.drafts.mutate(() => this.drafts.put({...this.drafts.blank(this.connection.id, new Date(entry.createdMs)), id: entry.id,
-      created: entry.created, body: record.body!, savedBody: record.body!, path: record.path, recordId: record.id}));
+      created: entry.created, body: record.body!, savedBody: confirmed ? record.body! : null,
+      savedRecordRevision: confirmed ? record.revision : undefined, pendingRecordRevision: confirmed ? undefined : record.revision,
+      path: record.path, recordId: record.id}));
     this.ensure();
     return this.drafts.get(draft.id)!;
   }
@@ -174,36 +188,44 @@ export class JournalData {
         .catch(() => {throw new Error("Keep this page open while its original save is unresolved.");});
       this.ensure(draft); currentRecord(record, attempt.recordId);
       if (record.body !== attempt.body) throw new Error("The original saved note has changed. Your local text has been preserved.");
-      draft = await this.drafts.mutate(() => this.drafts.patch(id, {recordId: attempt.recordId, savedBody: record.state.state === "confirmed" ? attempt.body : null}));
+      const confirmed = record.state.state === "confirmed";
+      draft = await this.drafts.mutate(() => this.drafts.patch(id, {recordId: attempt.recordId, savedBody: confirmed ? attempt.body : null,
+        savedRecordRevision: confirmed ? record.revision : undefined, pendingRecordRevision: confirmed ? undefined : record.revision}));
     }
     // An unconfirmed write from an earlier visit is in the SDK write ledger; the record stays editable.
     const lease = await this.connection.records.records.open(draft.recordId!, {signal: this.caller.signal, autosave: {idleMs: 1200}, requireLive: true});
     try {
-      this.ensure(draft);
-      const snapshot = lease.session.getSnapshot();
-      if (snapshot.state === "deleted") {await this.markDeleted(id, snapshot.record.id); throw new Error(DELETED_ENTRY_NOTICE);}
-      if (snapshot.state === "saved" && snapshot.body !== draft.savedBody && draft.body !== snapshot.body) throw new Error("This note changed elsewhere. Your local text has been preserved.");
+      let settling = !!lease.session.getSnapshot().recovery;
       const unsubscribe = lease.session.subscribe(() => {
         if (this.disposed || !this.connection.isCurrent() || this.problems.has(id)) return;
         const value = lease.session.getSnapshot(), capture = value.recovery;
+        const completed = settling && !capture;
+        settling = !!capture;
         if (value.state === "deleted") {
           void this.markDeleted(id, value.record.id)
             .catch(() => {this.problems.set(id, "Keep this page open: Journal cannot preserve the deletion notice on this device."); this.notify();});
         }
-        if (value.state === "conflict" && !this.drafts.get(id)?.reviewRequired) {
-          void this.drafts.mutate(() => this.drafts.patch(id, {reviewRequired: true}))
-            .catch(() => {this.problems.set(id, "Keep this page open: Journal cannot preserve its conflict on this device.");})
-            .finally(() => this.notify());
-        }
         if (value.state === "saving" && capture?.baseRevision && capture.recordId === value.record.id && this.capturedEdits.get(id)?.mutationId !== capture.mutationId) {
           this.capturedEdits.set(id, {mutationId: capture.mutationId, baseRevision: capture.baseRevision, body: value.body});
         }
-        if (value.state === "saved" && !value.dirty) {
+        const own = witnessedSave(value, this.capturedEdits.get(id));
+        let replaced = false;
+        if (completed && !own && (value.state === "saved" || value.state === "saved_on_device" || value.state === "unsaved")) {
+          const local = this.drafts.get(id);
+          // A retained session can finish a capture that predates this lease.
+          // With no capture witness, only an already-known base is safe.
+          replaced = this.capturedEdits.has(id) || !local || value.record.body !== local.body && !matchesDraftBase(local, value.record);
+        }
+        if (replaced) {
+          // Stop the SDK drive before it can save newer typing onto the unrelated
+          // readback. The complete text already lives in the origin store.
+          this.problems.set(id, EDITED_ENTRY_NOTICE);
+          this.close(id);
+        }
+        if (replaced || value.state === "conflict" || value.state === "saved" || value.state === "saved_on_device" || completed && own) {
           void this.drafts.mutate(() => {
-            const local = this.drafts.get(id);
-            if (!local) throw new Error("The original local draft is missing.");
-            // Clean text follows its SDK source; unsent writing stays put.
-            this.drafts.patch(id, local.body === local.savedBody ? {body: value.body, savedBody: value.body} : {savedBody: value.body});
+            if (replaced || !this.disposed && this.connection.isCurrent()) this.reconcile(id, value, own, replaced);
+            if (replaced) this.problems.delete(id);
           }).catch(() => {this.problems.set(id, "Keep this page open: Journal cannot preserve the original save outcome on this device.");})
             .finally(() => this.notify());
         }
@@ -211,16 +233,43 @@ export class JournalData {
       });
       this.unsubscriptions.set(id, unsubscribe);
       this.leases.set(id, lease);
-      const latest = this.drafts.get(id);
-      if (!latest) throw new Error("The original local draft is missing. Keep this page open.");
-      this.ensure(latest);
-      if (snapshot.state === "saved" || snapshot.state === "saved_on_device" || snapshot.state === "unsaved") lease.session.setBody(latest.body);
+      await this.drafts.mutate(() => {
+        this.ensure();
+        const snapshot = lease.session.getSnapshot();
+        if (snapshot.state === "deleted") return;
+        const latest = this.reconcile(id, snapshot);
+        if (latest.reviewRequired) throw new Error(EDITED_ENTRY_NOTICE);
+        this.ensure(latest);
+        if (snapshot.state === "saved" || snapshot.state === "saved_on_device" || snapshot.state === "unsaved") lease.session.setBody(latest.body);
+      });
+      const snapshot = lease.session.getSnapshot();
+      if (snapshot.state === "deleted") {await this.markDeleted(id, snapshot.record.id); throw new Error(DELETED_ENTRY_NOTICE);}
       if (this.problems.has(id)) throw new Error(this.problems.get(id));
       return lease;
     } catch (error) {
       this.unsubscriptions.get(id)?.(); this.unsubscriptions.delete(id); this.leases.delete(id); this.capturedEdits.delete(id);
       lease.release(); throw error;
     }
+  }
+  /** Check and advance the durable save base under the same lock as typing. */
+  private reconcile(id: string, snapshot: RecordSessionSnapshot, own = false, replaced = false): JournalDraft {
+    const local = this.drafts.get(id);
+    if (!local) throw new Error("The original local draft is missing. Keep this page open.");
+    if (local.reviewRequired || local.deletedElsewhere) return local;
+    const {body, revision, state} = snapshot.record;
+    const pending = state.state === "pending";
+    const knownBase = matchesDraftBase(local, snapshot.record);
+    const clean = local.body === local.savedBody && !local.pendingRecordRevision && !snapshot.dirty;
+    if (replaced || snapshot.state === "conflict" || body !== local.body && !knownBase && !own && (!clean || pending)) {
+      return this.drafts.patch(id, {reviewRequired: true});
+    }
+    if (pending) {
+      return (own || body === local.body || knownBase) && revision !== local.pendingRecordRevision
+        ? this.drafts.patch(id, {pendingRecordRevision: revision}) : local;
+    }
+    if (state.state !== "confirmed" || typeof body !== "string") return local;
+    if (body === local.savedBody && revision === local.savedRecordRevision && !local.pendingRecordRevision) return local;
+    return this.drafts.patch(id, {body: clean ? body : local.body, savedBody: body, savedRecordRevision: revision, pendingRecordRevision: undefined});
   }
   setBody(id: string, body: string, source?: {body: string; revision: string | null}): Promise<void> {
     const expectedRevision = this.drafts.get(id)?.revision;
@@ -233,18 +282,16 @@ export class JournalData {
       if (this.problems.has(id)) throw new Error(this.problems.get(id));
       const session = this.leases.get(id)?.session;
       const actual = session?.getSnapshot();
-      const capture = this.capturedEdits.get(id), receipt = actual?.lastReceipt;
+      const capture = this.capturedEdits.get(id);
       // A completed original SDK capture may advance the source before this
       // input gets the origin lock. Require its exact base/body, mutation and
       // receipt's current-record witness; outside/unknown outcomes still refuse.
       const ownSave = source && actual && capture && capture.baseRevision === source.revision && capture.body === source.body && actual.body === source.body &&
-        (actual.state === "saved" || actual.state === "saved_on_device") && receipt?.mutation === capture.mutationId &&
-        (receipt.state === "confirmed" || receipt.state === "pending") && receipt.status !== "conflicted" &&
-        receipt.records?.some(record => record.id === actual.record.id && record.revision === actual.record.revision);
+        (actual.state === "saved" || actual.state === "saved_on_device") && witnessedSave(actual, capture);
       // Never attach stale displayed text to a freshly advanced outside revision.
       if (source && actual && actual.body !== body && (actual.body !== source.body || !actual.dirty && source.revision !== null && actual.record.revision !== source.revision && !ownSave)) {
         this.drafts.patch(id, {reviewRequired: true});
-        throw new Error("This note changed elsewhere. Your local text has been preserved.");
+        throw new Error(EDITED_ENTRY_NOTICE);
       }
       session?.setBody(body);
     });
@@ -257,6 +304,7 @@ export class JournalData {
     this.ensure(original, true);
     const record = await this.connection.records.get(original.recordId, {include: {body: true, document: true}, signal: this.caller.signal});
     this.ensure(original, true); currentRecord(record, original.recordId);
+    if (record.state.state !== "confirmed") throw new Error("Wait for the saved version to sync. Your text stays on this device.");
     const owned = this.leases.get(id);
     // A released conflict can still be retained by this SDK client. Reopen it
     // only for this explicit discard, without seeding an autosaving draft.
@@ -266,8 +314,11 @@ export class JournalData {
       return await this.drafts.mutate(() => {
         const latest = this.drafts.get(id);
         if (!latest || latest.revision !== original.revision) throw new Error("Your text changed while the saved version was opening. Copy it before trying again.");
-        if (lease.session.getSnapshot().state === "conflict") lease.session.resolve({keep: "theirs"});
-        return this.drafts.patch(id, {body: record.body!, savedBody: record.body!, reviewRequired: false});
+        const snapshot = lease.session.getSnapshot();
+        if (snapshot.state === "conflict") lease.session.resolve({keep: "theirs"});
+        else if (snapshot.dirty && !snapshot.recovery && snapshot.record.revision === record.revision) lease.session.setBody(record.body!);
+        return this.drafts.patch(id, {body: record.body!, savedBody: record.body!, savedRecordRevision: record.revision,
+          pendingRecordRevision: undefined, reviewRequired: false});
       });
     } finally {if (!owned) lease.release();}
   }

@@ -156,6 +156,120 @@ test("stale displayed native text cannot use a fresh SDK revision, including aft
     } finally {update.mock.restore();}
   } finally {data.release(); h.close();}
 });
+test("a remote edit delivered during reconnect cannot become the base of a stored offline draft", async () => {
+  const h = await applicationFixture(), drafts = new JournalDrafts(memoryStorage());
+  const id = drafts.put({...drafts.blank(h.connection.id), body: "Seed", path: "offline-draft.md"}).id;
+  const data = new JournalData(h.connection, drafts);
+  try {
+    const lease = await data.open(id, journalEntryTypes(catalog())[0]!);
+    const recordId = lease.session.getSnapshot().record.id;
+    h.replica.setOnline(false);
+    // The origin store holds the edit before it can reach a borrowed SDK lease.
+    drafts.patch(id, {body: "Offline writing"});
+    h.replica.setOnline(true);
+    h.replica.editElsewhere(recordId, {body: "Other device"});
+    for (let i = 0; i < 100 && lease.session.getSnapshot().body !== "Other device"; i++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(lease.session.getSnapshot().body, "Other device");
+    assert.equal(drafts.get(id)?.body, "Offline writing");
+    assert.equal(drafts.get(id)?.savedBody, "Seed");
+    assert.equal(drafts.get(id)?.reviewRequired, true);
+    data.release();
+    const reopened = new JournalData(h.connection, drafts);
+    try {
+      await assert.rejects(reopened.open(id), /changed elsewhere/);
+      assert.equal((await h.records.get(recordId, {include: {body: true}})).body, "Other device");
+      assert.equal((await reopened.useSavedVersion(id)).body, "Other device");
+    } finally {reopened.release();}
+  } finally {data.release(); h.close();}
+});
+for (const newerTyping of [false, true]) test(`an offline capture replaced on reconnect retains ${newerTyping ? "newer typing" : "the captured text"}`, async () => {
+  const h = await applicationFixture(), drafts = new JournalDrafts(memoryStorage());
+  const id = drafts.put({...drafts.blank(h.connection.id), body: "Seed", path: "offline-capture.md"}).id;
+  const data = new JournalData(h.connection, drafts);
+  try {
+    const lease = await data.open(id, journalEntryTypes(catalog())[0]!);
+    const recordId = lease.session.getSnapshot().record.id;
+    h.replica.setOnline(false);
+    await data.setBody(id, "Offline writing");
+    const reconnect = deferred<void>(), submit = h.records.update.bind(h.records);
+    const update = mock.method(h.records, "update", async (...args: Parameters<typeof submit>) => {
+      const write = await submit(...args);
+      reconnect.resolve();
+      return write;
+    });
+    const saving = lease.session.flush({timeoutMs: 2000});
+    await reconnect.promise;
+    if (newerTyping) await data.setBody(id, "Offline writing plus more");
+    h.replica.editElsewhere(recordId, {body: "Other device"});
+    h.replica.setOnline(true); h.replica.confirmAll();
+    await saving;
+    assert.equal(update.mock.callCount(), 1);
+    assert.equal(drafts.get(id)?.body, newerTyping ? "Offline writing plus more" : "Offline writing");
+    assert.equal(drafts.get(id)?.savedBody, "Seed");
+    assert.equal(drafts.get(id)?.reviewRequired, true);
+    assert.equal((await h.records.get(recordId, {include: {body: true}})).body, "Other device");
+    const saved = await data.useSavedVersion(id);
+    assert.equal(saved.body, "Other device");
+    assert.equal(saved.reviewRequired, false);
+    assert.equal((await data.open(id)).session.getSnapshot().dirty, false);
+    assert.equal(update.mock.callCount(), 1);
+    update.mock.restore();
+  } finally {data.release(); h.close();}
+});
+test("reopening a pending offline edit in a fresh client keeps its witnessed base until review", async () => {
+  const h = await applicationFixture(), drafts = new JournalDrafts(memoryStorage()), data = new JournalData(h.connection, drafts);
+  const id = drafts.put({...drafts.blank(h.connection.id), body: "Seed", path: "offline-reopen.md"}).id;
+  const records = await h.replica.client();
+  const reopened = new JournalData({...h.connection, records, files: records.files}, drafts);
+  try {
+    const lease = await data.open(id, journalEntryTypes(catalog())[0]!);
+    const recordId = lease.session.getSnapshot().record.id;
+    h.replica.setOnline(false);
+    await data.setBody(id, "Offline writing");
+    assert.equal((await lease.session.flush({timeoutMs: 150})).ok, true);
+    assert.equal(lease.session.getSnapshot().state, "saved_on_device");
+    assert.equal(drafts.get(id)?.pendingRecordRevision, lease.session.getSnapshot().record.revision);
+    await data.setBody(id, "Offline writing plus more");
+    data.release();
+    h.replica.editElsewhere(recordId, {body: "Other device"});
+    h.replica.setOnline(true); h.replica.confirmAll();
+    await assert.rejects(reopened.open(id), /changed elsewhere/);
+    assert.equal(drafts.get(id)?.body, "Offline writing plus more");
+    assert.equal(drafts.get(id)?.reviewRequired, true);
+    assert.equal((await h.records.get(recordId, {include: {body: true}})).body, "Other device");
+  } finally {reopened.release(); records.close(); data.release(); h.close();}
+});
+test("an SDK capture retained across lease release cannot replay newer typing against another editor's text", async () => {
+  const h = await applicationFixture(), drafts = new JournalDrafts(memoryStorage()), data = new JournalData(h.connection, drafts);
+  const id = drafts.put({...drafts.blank(h.connection.id), body: "Seed", path: "offline-retained.md"}).id;
+  const reopened = new JournalData(h.connection, drafts);
+  const captured = deferred<void>(), submit = h.records.update.bind(h.records);
+  const update = mock.method(h.records, "update", async (...args: Parameters<typeof submit>) => {
+    const write = await submit(...args);
+    captured.resolve();
+    return write;
+  });
+  try {
+    const lease = await data.open(id, journalEntryTypes(catalog())[0]!);
+    const recordId = lease.session.getSnapshot().record.id;
+    h.replica.setOnline(false);
+    await data.setBody(id, "Offline writing");
+    const saving = lease.session.flush({timeoutMs: 2000});
+    await captured.promise;
+    await data.setBody(id, "Offline writing plus more");
+    data.release();
+    await saving;
+    await reopened.open(id);
+    h.replica.editElsewhere(recordId, {body: "Other device"});
+    h.replica.setOnline(true); h.replica.confirmAll();
+    for (let i = 0; i < 100 && !drafts.get(id)?.reviewRequired; i++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(drafts.get(id)?.reviewRequired, true);
+    assert.equal(drafts.get(id)?.body, "Offline writing plus more");
+    await assert.rejects(reopened.flush(id), /changed elsewhere/);
+    assert.equal(update.mock.callCount(), 1);
+    assert.equal((await h.records.get(recordId, {include: {body: true}})).body, "Other device");
+  } finally {update.mock.restore(); reopened.release(); data.release(); h.close();}
+});
 test("clean native SDK source updates reconcile text as well as its saved baseline", async () => {
   const h = await applicationFixture(), drafts = new JournalDrafts(memoryStorage());
   const draft = drafts.put({...drafts.blank(h.connection.id), body: "Seed", path: "native-clean-update.md"});

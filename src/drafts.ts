@@ -27,6 +27,10 @@ export interface JournalDraft {
   targetCollectionId: string | null;
   recordId: string | null;
   savedBody: string | null;
+  /** Native revision associated with savedBody, separate from the local text revision. */
+  savedRecordRevision?: string | undefined;
+  /** Last revision witnessed in this draft's on-device write. */
+  pendingRecordRevision?: string | undefined;
   createAttempt: CreateAttempt | null;
   finished: boolean;
   touchedMs: number;
@@ -45,6 +49,8 @@ function validDraft(value: unknown): value is JournalDraft {
   if (value.legacyKey !== undefined && (typeof value.legacyKey !== "string" || !value.legacyKey.startsWith("journal.note.") || value.legacyKey.length > 1024 || value.createAttempt !== null || value.recordId !== null)) return false;
   if (value.reviewRequired !== undefined && typeof value.reviewRequired !== "boolean") return false;
   if (value.deletedElsewhere !== undefined && typeof value.deletedElsewhere !== "boolean") return false;
+  if (value.savedRecordRevision !== undefined && typeof value.savedRecordRevision !== "string" ||
+      value.pendingRecordRevision !== undefined && typeof value.pendingRecordRevision !== "string") return false;
   const attempt = value.createAttempt;
   if (attempt !== null && (!object(attempt) || ["body", "typeName", "createdField", "path", "created", "account", "installation"].some(key => typeof attempt[key] !== "string") ||
       !uuid(attempt.mutationId) || !uuid(attempt.recordId) || attempt.created !== value.created || attempt.path !== value.path || !value.targetCollectionId)) return false;
@@ -140,7 +146,7 @@ export class JournalDrafts {
     return this.put({...existing ?? base, body, path: existing?.path ?? path, touchedMs: Date.now()});
   }
   private canPrune(draft: JournalDraft, now: number): boolean {
-    return !this.pins.has(draft.id) && draft.finished && !!draft.recordId && !draft.legacyKey &&
+    return !this.pins.has(draft.id) && draft.finished && !!draft.recordId && !draft.legacyKey && !draft.reviewRequired && !draft.pendingRecordRevision &&
       draft.body === draft.savedBody && draft.touchedMs <= now - 6 * 60 * 60 * 1000;
   }
   /** Reclaim old confirmed copies on a new visit, before hitting a quota.
