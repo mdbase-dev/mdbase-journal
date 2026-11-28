@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {mock, test} from "node:test";
 import {JSDOM} from "jsdom";
-import type {MdbaseApplicationConnection, MdbaseSetupPlan} from "@mdbase-dev/sdk";
+import {revisionOf, type MdbaseApplicationConnection, type MdbaseSetupPlan} from "@mdbase-dev/sdk";
 import {JournalDrafts} from "../src/drafts.js";
 import {
   backupFolderFor,
@@ -123,7 +123,7 @@ test("backupPathFor produces safe non-record, non-resource backup paths", () => 
   assert.equal(path.startsWith("_types/"), false);
 });
 
-test("inspectSetupConflicts ignores adoptable conflicts and classifies non-adoptable conflicts by grant", async () => {
+test("inspectSetupConflicts offers backed-up restoration for adoptable and non-adoptable definitions", async () => {
   const f = await applicationFixture();
   try {
     const adoptablePlan: MdbaseSetupPlan = {
@@ -131,13 +131,13 @@ test("inspectSetupConflicts ignores adoptable conflicts and classifies non-adopt
       conflicts: [{target: "_types/journal-entry.md", message: "Differs.", adoptable: {digest: "sha256:" + "b".repeat(64)}}],
       adoptable: {"_types/journal-entry.md": "sha256:" + "b".repeat(64)},
     };
-    assert.equal(inspectSetupConflicts(adoptablePlan, f.connection.id, f.connection), null);
+    assert.equal(inspectSetupConflicts(adoptablePlan, f.connection.id, f.connection)?.canRestoreWithBackup, true);
 
     const forbiddenPlan: MdbaseSetupPlan = {
       ...nonAdoptablePlan(),
       refusal: {code: "setup_forbidden", message: "No permission"},
     };
-    assert.equal(inspectSetupConflicts(forbiddenPlan, f.connection.id, f.connection), null);
+    assert.equal(inspectSetupConflicts(forbiddenPlan, f.connection.id, f.connection)?.unavailableReason, "no_permission");
 
     const restorable = inspectSetupConflicts(nonAdoptablePlan(), f.connection.id, f.connection);
     assert(restorable);
@@ -249,6 +249,75 @@ test("restoreSetupDefinitions backs up the hand-edited file, restores Journal's 
   }
 });
 
+test("Journal takes over the shared review for a remapped, adoptable contract and backs up the edited bytes", async () => {
+  const f = await applicationFixture();
+  const h = dom();
+  const {document} = h.window;
+  const style = document.createElement("style");
+  style.textContent = readFileSync(new URL("../public/journal.css", import.meta.url), "utf8");
+  document.head.append(style);
+  const target = "_mdbase/contracts/journal.entry.md";
+  const canonical = bundledSetupDefinitions().get(CONTRACT_TARGET)!.document;
+  const digest = revisionOf(HAND_EDITED_CONTRACT);
+  const refusal = nonAdoptablePlan(target);
+  const conflict: MdbaseSetupPlan = {...refusal, adoptable: {[target]: digest},
+    conflicts: [{...refusal.conflicts[0]!, adoptable: {digest}}]};
+  const {refusal: _refusal, ...review} = conflict;
+  const adopted: MdbaseSetupPlan = {...review, status: "setup", canApply: true, conflicts: [], adoptable: {}, staged: [{path: target, document: canonical}]};
+  try {
+    await (await f.records.resources.put(target, HAND_EDITED_CONTRACT)).confirmed;
+    f.fixture.controls.publishSnapshot(needsSetupSnapshot(f.ready));
+    const plan = mock.fn<typeof f.mdbase.setup.plan>(async request => {
+      if (request?.adopt) assert.deepEqual(request.adopt, {[target]: digest});
+      return request?.adopt ? adopted : conflict;
+    });
+    const apply = mock.fn(f.mdbase.setup.apply);
+    const mdbase = {...f.mdbase, setup: {plan, apply}, assess: async () => {
+      f.fixture.controls.publishSnapshot(f.ready);
+      return f.ready.readiness;
+    }};
+    const view = mountJournal(document, new JournalDrafts(memoryStorage()), mdbase);
+    try {
+      h.write("A draft on the edited collection");
+      h.click("status-button");
+      const shared = await until(() => document.querySelector("#collection-panel .mdbase-collections-setup") ?? undefined);
+      assert.match(shared.textContent!, /Use Journal.s version/);
+      assert.equal(h.window.getComputedStyle(shared).display, "none");
+      const restore = document.querySelector<HTMLButtonElement>("#restore-setup-definition")!;
+      await until(() => !restore.hidden || undefined);
+      assert.match(document.getElementById("setup-conflict-guidance")!.textContent!, /_mdbase\/contracts\/journal\.entry\.md/);
+
+      h.click("cancel-setup-conflict");
+      assert.equal(h.menu.open, false);
+      assert.equal(view.currentDraft().body, "A draft on the edited collection");
+      assert.equal((await f.records.resources.get(target)).text, HAND_EDITED_CONTRACT);
+
+      h.click("status-button");
+      restore.click();
+      const backup = await until(() => document.getElementById("setup-conflict-notice")!.textContent?.match(/journal-setup-backups\/[^\s]+\.bak\.txt/)?.[0]);
+      assert.equal((await f.records.resources.get(target)).text, canonical);
+      assert.equal(new TextDecoder().decode(await f.records.files.download({path: backup})), HAND_EDITED_CONTRACT);
+      assert.equal(apply.mock.callCount(), 0);
+    } finally {view.dispose();}
+  } finally {h.window.close(); await f.fixture.close();}
+});
+
+test("an adoptable definition changed before restore is left for a fresh review", async () => {
+  const f = await applicationFixture();
+  const definition = bundledSetupDefinitions().get(CONTRACT_TARGET)!;
+  const upload = mock.method(f.records.files, "upload");
+  try {
+    const newer = HAND_EDITED_CONTRACT + "Another edit.";
+    await (await f.records.resources.put(CONTRACT_TARGET, newer)).confirmed;
+    await assert.rejects(
+      restoreSetupDefinitions(f.mdbase, f.connection.id, [{...definition, reviewedRevision: revisionOf(HAND_EDITED_CONTRACT)}]),
+      /changed since setup was reviewed/,
+    );
+    assert.equal(upload.mock.callCount(), 0);
+    assert.equal((await f.records.resources.get(CONTRACT_TARGET)).text, newer);
+  } finally {upload.mock.restore(); await f.fixture.close();}
+});
+
 test("restoreSetupDefinitions never overwrites the hand-edited file if saving its backup fails", async () => {
   const f = await applicationFixture();
   const h = dom();
@@ -299,7 +368,7 @@ test("restoreSetupDefinitions refuses blind overwrite when the definition change
     });
     try {
       await assert.rejects(
-        restoreSetupDefinitions(f.mdbase, f.connection.id, [CONTRACT_TARGET], {
+        restoreSetupDefinitions(f.mdbase, f.connection.id, [bundledSetupDefinitions().get(CONTRACT_TARGET)!], {
           now: () => new Date("2026-11-27T08:30:15Z"),
           suffix: () => "race01",
         }),
