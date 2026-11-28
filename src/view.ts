@@ -103,7 +103,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   let observedCollectionId = mdbase?.getSnapshot().selectedCollectionId ?? null;
   let current = drafts.blank(observedCollectionId);
   try {
-    const earlier = drafts.list().filter(draft => !draft.legacyKey && (draft.body.trim() || draft.deletedElsewhere && draft.body !== draft.savedBody) &&
+    const earlier = drafts.list().filter(draft => !draft.legacyKey && (draft.body.trim() || draft.reviewRequired || draft.deletedElsewhere && draft.body !== draft.savedBody) &&
       (!draft.deletedElsewhere || draft.body !== draft.savedBody) && (!observedCollectionId || draft.targetCollectionId === observedCollectionId))
       .sort((a, b) => Number(a.finished) - Number(b.finished) || b.touchedMs - a.touchedMs)[0];
     if (earlier) current = drafts.patch(earlier.id, {finished: false});
@@ -235,7 +235,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
     try {
       const localDrafts = drafts.list();
       if (entriesDialog.open) renderEntries(localDrafts);
-      unresolved = localDrafts.filter(draft => !!draft.body.trim() && draft.body !== draft.savedBody);
+      unresolved = localDrafts.filter(draft => draft.reviewRequired || !!draft.body.trim() && draft.body !== draft.savedBody);
     } catch {
       if (entriesDialog.open) {entriesProblem = "Earlier notes could not be read on this device."; renderEntries([]);}
       problem = "Keep this page open: Journal cannot read its drafts on this device.";
@@ -392,7 +392,7 @@ export function mountJournal(document: Document, drafts: JournalDrafts, mdbase: 
   function visibleEntries(bounds: [number, number] | null, localDrafts: readonly JournalDraft[]): {entry: JournalEntry; draft: JournalDraft | null}[] {
     const collection = snapshot()?.selectedCollectionId ?? current.targetCollectionId;
     const local = localDrafts.filter(draft => draft.targetCollectionId === collection &&
-      (draft.deletedElsewhere ? draft.body !== draft.savedBody : draft.body.trim()));
+      (draft.deletedElsewhere ? draft.body !== draft.savedBody : draft.reviewRequired || draft.body.trim()));
     const [start, end] = bounds ?? [-Infinity, Infinity];
     const saved = bounds ? entries.slice(firstOlderThan(entries, end), firstOlderThan(entries, start)) : entries;
     const localRecordIds = new Set(local.map(draft => draft.recordId));
